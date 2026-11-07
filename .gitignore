@@ -22,3 +22,12 @@ $RECYCLE.BIN/
 .vscode/
 *.code-workspace
 run.bat
+
+# Regenerated Kawari assembler listings and intermediates
+3-assembled-output/kawari-compile.txt
+3-assembled-output/labels.txt
+3-assembled-output/cpu-labels.txt
+3-assembled-output/kawari-cpu.bin
+3-assembled-output/elite-kawari.prg
+3-assembled-output/launch.prg
+__pycache__/

@@ -1,5 +1,10 @@
 # Fully documented source code for Elite on the Commodore 64
 
+This working tree now builds a PAL-only VIC-II Kawari port. See
+[KAWARI.md](KAWARI.md) for the build/run instructions, VRAM renderer design,
+tests and current limitations. The historical documentation below describes
+the upstream game and its original build system.
+
 <details>
 <summary>Links to my other software archaeology repositories</summary>
 <hr>

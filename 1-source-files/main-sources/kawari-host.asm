@@ -1,0 +1,586 @@
+; The IRQ only changes VIDEO_MODE1, never the VRAM ports. All command/DMA
+; traffic belongs to the foreground, with I/O and L1M mapped together.
+.KW_INIT
+ KW_SAVE
+ LDA #0
+ STA KW_ACTIVE
+ STA KW_DIRTY
+ STA KW_WRITE
+ STA $D037
+ STA $D035
+ STA $D039
+ STA $D03C
+ LDA #$1C
+ STA KW_WRITE+1
+ LDA #$80
+ STA $D03A
+ LDA #$7D
+ STA $D036
+ LDA #15
+ STA $D03F
+ LDA #4
+ STA $D03B             ; blank 32000 displayed bytes, ending below $10000
+                       ; (the emulator's fill completion doesn't wrap)
+.KW_INIT_WAIT
+ LDA $D036
+ BNE KW_INIT_WAIT
+ LDA #1
+ STA $D038             ; display base $8000
+ LDA #0
+ STA $D03F
+ STA $D035
+ LDA #$7F
+ STA $D03A
+ LDA #$F0
+ STA $D039
+ LDA #$FF
+ STA $D03B             ; startup handshake
+ LDA #$20
+ STA $D03F
+ LDA #0
+ STA $D03A
+ LDA #$20
+ STA $D039
+ LDA #0
+ STA $D03B             ; CPU_START_LO
+ INC $D039
+ LDA #2
+ STA $D03B             ; CPU_START_HI
+ LDA #$2B
+ STA $D039
+ LDA #0
+ STA $D03B             ; CPU_SPEED = full speed
+ LDA #$22
+ STA $D039
+ LDA #0
+ STA $D03B             ; release CPU reset
+ STA $D03F
+ LDA #$7F
+ STA $D03A
+ LDA #$F0
+ STA $D039
+.KW_READY
+ LDA $D03B
+ BNE KW_READY
+ KW_RESTORE
+
+; One mailbox round-trip moves, rotates and plots all 12 dust particles.
+; Host state remains authoritative so view changes and hyperspace can reset
+; it normally. Only the private copy is touched by the co-processor.
+.KW_STARS
+ KW_SAVE
+ JSR KW_OPEN
+ LDA #7
+ STA $D03B
+ LDX #0
+ LDY #0
+.KW_STARS_CONTROLS
+ LDA KW_STARS_ADDR,X
+ STA KW_PTR
+ INX
+ LDA KW_STARS_ADDR,X
+ STA KW_PTR+1
+ INX
+ LDA (KW_PTR),Y
+ STA $D03B
+ CPX #34
+ BNE KW_STARS_CONTROLS
+ LDX #0
+.KW_STARS_PARTICLES
+ LDA SX,X
+ STA $D03B
+ INX
+ CPX #78
+ BNE KW_STARS_PARTICLES
+ JSR KW_CLOSE
+ JSR KW_FLUSH
+ LDA #1
+ STA $D03F
+ LDA #$1D
+ STA $D039
+ LDA #$7C
+ STA $D03A
+ LDX #0
+.KW_STARS_RANDOM
+ LDA $D03B
+ STA RAND,X
+ INX
+ CPX #4
+ BNE KW_STARS_RANDOM
+ LDX #0
+.KW_STARS_RESULT
+ LDA $D03B
+ STA SX,X
+ INX
+ CPX #78
+ BNE KW_STARS_RESULT
+ KW_RESTORE
+.KW_STARS_ADDR
+ EQUW VIEW,NOSTM,DELTA,DELT4,DELT4+1,ALPHA,ALP1,ALP2,ALP2+1
+ EQUW BETA,BET1,BET2,BET2+1,RAND,RAND+1,RAND+2,RAND+3
+
+.KW_OPEN
+ LDA KW_WRITE+1
+ CMP #$1F             ; reserve a whole page for the largest command
+ BCC KW_SPACE
+ JSR KW_FLUSH
+.KW_SPACE
+ LDA #1
+ STA KW_DIRTY
+ STA $D03F
+ LDA #0
+ STA $D035
+ LDA KW_WRITE
+ STA $D039
+ LDA KW_WRITE+1
+ STA $D03A
+ RTS
+.KW_CLOSE
+ LDA $D039
+ STA KW_WRITE
+ LDA $D03A
+ STA KW_WRITE+1
+ RTS
+.KW_FLUSH
+ LDA KW_WRITE
+ BNE KW_SUBMIT
+ LDA KW_WRITE+1
+ CMP #$1C
+ BEQ KW_FLUSH_DONE
+.KW_SUBMIT
+ LDA #1
+ STA $D03F
+ LDA KW_WRITE
+ STA $D039
+ LDA KW_WRITE+1
+ STA $D03A
+ LDA #0
+ STA $D03B             ; END, committed before the mailbox
+ STA $D03F
+ LDA #$F0
+ STA $D039
+ LDA #$7F
+ STA $D03A
+ LDA #1
+ STA $D03B
+.KW_BUSY
+ LDA $D03B
+ BNE KW_BUSY
+ STA KW_WRITE
+ LDA #$1C
+ STA KW_WRITE+1
+.KW_FLUSH_DONE
+ RTS
+
+.KW_LINE
+ LDA KW_ACTIVE
+ BNE KW_VRAM_LINE
+ JMP KW_DRAM_LINE
+.KW_VRAM_LINE
+ KW_SAVE
+ JSR KW_OPEN
+ LDA #1
+.KW_SEGMENT
+ STA $D03B
+ LDA X1
+ STA $D03B
+ LDA Y1
+ STA $D03B
+ LDA X2
+ STA $D03B
+ LDA Y2
+ STA $D03B
+ LDA #1               ; per-command colour: white for now
+ STA $D03B
+ JSR KW_CLOSE
+ KW_RESTORE
+.KW_HLINE
+ LDA KW_ACTIVE
+ BEQ KW_HLINE_LEGACY
+ LDA Y1
+ CMP #144
+ BCS KW_HLINE_LEGACY
+ KW_SAVE
+ JSR KW_OPEN
+ LDA #2
+ JMP KW_SEGMENT
+.KW_HLINE_LEGACY
+ JMP KW_OLD_HLOIN
+.KW_PIXEL
+ PHA
+ LDA KW_ACTIVE
+ BEQ KW_PIXEL_LEGACY
+ PLA
+ KW_SAVE
+ TSX
+ LDA $0104,X          ; saved A (bank, Y, X, A above the caller's return)
+ STA KW_ARG
+ JSR KW_OPEN
+ LDA #3
+ STA $D03B
+ TSX
+ LDA $0103,X          ; saved X
+ STA $D03B
+ LDA KW_ARG
+ STA $D03B
+ LDA ZZ
+ STA $D03B
+ LDA #1
+ STA $D03B
+ JSR KW_CLOSE
+ KW_RESTORE
+.KW_PIXEL_LEGACY
+ PLA
+ JMP KW_OLD_PIXEL
+.KW_CHAR
+ LDA L1M              ; KERNAL messages use its swapped zero page, not ours
+ CMP #6
+ BEQ KW_CHAR_DONE
+ LDA KW_ACTIVE
+ BEQ KW_CHAR_DONE
+ LDA YC
+ CMP #18
+ BCS KW_CHAR_DONE
+ KW_SAVE
+ JSR KW_OPEN
+ LDA #4
+ STA $D03B
+ LDA XC
+ ASL A
+ ASL A
+ ASL A
+ STA $D03B
+ LDA YC
+ ASL A
+ ASL A
+ ASL A
+ STA $D03B
+ LDA #1
+ STA $D03B
+ LDY #0
+.KW_CHAR_ROW
+ LDA (P+1),Y
+ STA $D03B
+ INY
+ CPY #8
+ BNE KW_CHAR_ROW
+ JSR KW_CLOSE
+ KW_RESTORE
+.KW_CHAR_DONE
+ RTS
+
+.KW_DELETE
+ KW_SAVE
+ LDA XC
+ ASL A
+ ASL A
+ STA KW_X
+ LDA YC
+ ASL A
+ ASL A
+ ASL A
+ STA KW_Y
+ LDA #4
+ STA KW_DX
+ LDA #8
+ STA KW_DY
+ JMP KW_CLEAR_BOX
+.KW_TEXT_PAGE
+ PHP
+ PHA
+ LDA L1M
+ CMP #6
+ BNE KW_TEXT_GAME
+ PLA
+ PLP
+ RTS
+.KW_TEXT_GAME
+ PLA
+ PLP
+ KW_SAVE
+ LDA #0
+ STA KW_X
+ LDA #8
+ STA KW_Y
+ LDA #128
+ STA KW_DX
+ LDA #136
+ STA KW_DY
+.KW_CLEAR_BOX
+ LDA KW_ACTIVE
+ BEQ KW_CLEAR_BOX_DONE
+ JSR KW_OPEN
+ LDA #8
+ STA $D03B
+ LDA KW_X
+ STA $D03B
+ LDA KW_Y
+ STA $D03B
+ LDA KW_DX
+ STA $D03B
+ LDA KW_DY
+ STA $D03B
+ JSR KW_CLOSE
+.KW_CLEAR_BOX_DONE
+ KW_RESTORE
+.KW_UNBORDER
+ KW_SAVE
+ JSR KW_OPEN
+ LDA #9
+ STA $D03B
+ JSR KW_CLOSE
+ KW_RESTORE
+.KW_CLEAR
+ KW_SAVE
+ JSR KW_FLUSH
+ LDA #0
+ STA KW_ACTIVE
+ LDA QQ11
+ BEQ KW_CLEAR_SPACE
+ CMP #1              ; mission briefings also contain rotating ships
+ BEQ KW_CLEAR_SPACE
+ CMP #3              ; the second hyperspace tunnel in a mis-jump
+ BEQ KW_CLEAR_SPACE
+ CMP #6              ; death/explosion scene
+ BEQ KW_CLEAR_SPACE
+ CMP #13
+ BNE KW_CLEAR_DONE
+.KW_CLEAR_SPACE
+ INC KW_ACTIVE
+ JSR KW_OPEN
+ LDA #5
+ STA $D03B
+ JSR KW_CLOSE
+.KW_CLEAR_DONE
+ KW_RESTORE
+
+.KW_PRESENT
+ PHP
+ PHA
+ LDA KW_ACTIVE
+ BEQ KW_PRESENT_DONE
+ LDA KW_DIRTY
+ BEQ KW_PRESENT_DONE
+ PLA
+ PLP
+ KW_SAVE
+ JSR KW_FLUSH
+ ; At PAL 8 bytes/cycle the 23040-byte copy needs 2880 cycles. Start
+ ; in rows 194..249: it finishes before row 296, well before row 50.
+.KW_SAFE_RASTER
+ BIT $D011
+ BMI KW_SAFE_RASTER
+ LDA $D012
+ CMP #194
+ BCC KW_SAFE_RASTER
+ CMP #250
+ BCS KW_SAFE_RASTER
+ LDA #15
+ STA $D03F
+ LDA #0
+ STA $D039
+ STA $D03C
+ STA $D035
+ LDA #$80
+ STA $D03A
+ LDA #$20
+ STA $D03D
+ LDA #$5A
+ STA $D036
+ LDA #1
+ STA $D03B
+.KW_COPY_WAIT
+ LDA $D036
+ BNE KW_COPY_WAIT
+ STA KW_DIRTY
+ STA $D03F
+ INC KW_FRAMES
+ BNE KW_FRAME_COUNTED
+ INC KW_FRAMES+1
+.KW_FRAME_COUNTED
+ KW_RESTORE
+.KW_PRESENT_DONE
+ PLA
+ PLP
+ RTS
+.KW_FRAMES
+ EQUW 0
+.KW_BANK_NOIRQ
+ ; Disk setup/teardown already has SEI set. Unlike SETL1, do not enable
+ ; interrupts before the zero-page swap and IRQ configuration are complete.
+ STA L1M
+ LDA l1
+ AND #$F8
+ ORA L1M
+ STA l1
+ RTS
+.KW_IRQ
+ LDA moonflower,X
+ STA VIC+$16
+ LDA #$48             ; 320x200, legacy badlines allowed, hires off
+ CPX #0
+ BNE KW_IRQ_SET
+ LDA KW_ACTIVE
+ BEQ KW_IRQ_SET
+ LDA #$58
+.KW_IRQ_SET
+ ORA #$48
+ STA $D037
+ RTS
+
+; Exact unsigned multiply, performed by the host because the co-processor
+; cannot access the math registers. MU11 remains for its separate callers.
+.KW_MULT
+ STY KW_ARG
+ LDA L1M
+ STA KW_BANK
+ LDA #5
+ JSR SETL1
+ LDA #0
+ STA $D02F
+ STA $D031
+ LDA P
+ STA $D030
+ LDA Q
+ STA $D032
+ LDA #0
+ STA $D033
+ LDA $D032
+ STA P
+ LDA $D031
+ PHA
+ LDA KW_BANK
+ JSR SETL1
+ PLA
+ LDX #0
+ LDY KW_ARG
+ CLC
+ RTS
+
+; Compact legacy chart line path. Space/ship lines always use the 16MHz CPU.
+; Eight-bit major-axis DDA with a hardware slope divide; one-bit plotting.
+.KW_DRAM_LINE
+ STY YSAV
+ LDA X1
+ STA KW_X
+ LDA Y1
+ STA KW_Y
+ SEC
+ LDA X2
+ SBC X1
+ BCS KW_DX_POS
+ EOR #$FF
+ ADC #1
+.KW_DX_POS
+ STA KW_DX
+ SEC
+ LDA Y2
+ SBC Y1
+ BCS KW_DY_POS
+ EOR #$FF
+ ADC #1
+.KW_DY_POS
+ STA KW_DY
+ CMP KW_DX
+ BCC KW_MAJOR_X
+ LDA KW_DY
+ LDX KW_DX
+ LDY #1
+ BNE KW_SLOPE_SETUP
+.KW_MAJOR_X
+ LDA KW_DX
+ LDX KW_DY
+ LDY #0
+.KW_SLOPE_SETUP
+ STA KW_COUNT
+ STY KW_STEP
+ LDA KW_COUNT
+ BNE KW_HAVE_LINE
+ LDY YSAV
+ RTS
+.KW_HAVE_LINE
+ PHA
+ LDA L1M
+ STA KW_BANK
+ LDA #5
+ JSR SETL1
+ PLA
+ STA $D032
+ STX $D02F
+ LDA #0
+ STA $D030
+ STA $D031
+ LDA #1
+ STA $D033
+ LDA $D032
+ STA KW_SLOPE
+ LDA $D031
+ BEQ KW_SLOPE_OK
+ LDA #255
+ STA KW_SLOPE
+.KW_SLOPE_OK
+ LDA KW_BANK
+ JSR SETL1
+ LDA #128
+ STA KW_ERR
+.KW_DRAM_PLOT
+ LDY KW_Y
+ LDA KW_X
+ AND #$F8
+ CLC
+ ADC ylookupl,Y
+ STA SC
+ LDA ylookuph,Y
+ ADC #0
+ STA SC+1
+ TYA
+ AND #7
+ TAY
+ LDA KW_X
+ AND #7
+ TAX
+ LDA TWOS,X
+ EOR (SC),Y
+ STA (SC),Y
+ DEC KW_COUNT
+ BEQ KW_DRAM_RETURN
+ LDA KW_ERR
+ CLC
+ ADC KW_SLOPE
+ STA KW_ERR
+ BCC KW_MAJOR_STEP
+ LDA KW_STEP
+ BEQ KW_MINOR_Y
+ JSR KW_STEP_X
+ JMP KW_MAJOR_STEP
+.KW_MINOR_Y
+ JSR KW_STEP_Y
+.KW_MAJOR_STEP
+ LDA KW_STEP
+ BEQ KW_MAJOR_STEP_X
+ JSR KW_STEP_Y
+ JMP KW_DRAM_PLOT
+.KW_MAJOR_STEP_X
+ JSR KW_STEP_X
+ JMP KW_DRAM_PLOT
+.KW_DRAM_RETURN
+ LDY YSAV
+ RTS
+.KW_STEP_X
+ LDA X1
+ CMP X2
+ BCS KW_STEP_LEFT
+ INC KW_X
+ RTS
+.KW_STEP_LEFT
+ DEC KW_X
+ RTS
+.KW_STEP_Y
+ LDA Y1
+ CMP Y2
+ BCS KW_STEP_UP
+ INC KW_Y
+ RTS
+.KW_STEP_UP
+ DEC KW_Y
+ RTS

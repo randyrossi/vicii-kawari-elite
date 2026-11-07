@@ -618,13 +618,11 @@ ENDIF
  STA VIC+$2E            ; the colour number in bits 0-3 (i.e. colour 9, brown),
                         ; so this makes Trumble 5 brown
 
- LDA #8                 ; Set VIC register $25 to set sprite extra colour 1 to
- STA VIC+$25            ; the colour number in bits 0-3 (i.e. colour 8, orange),
-                        ; for the explosion sprite
+ LDA #1                 ; Monochrome explosion sprite (Kawari space view)
+ STA VIC+$25
 
- LDA #7                 ; Set VIC register $26 to set sprite extra colour 2 to
- STA VIC+$26            ; the colour number in bits 0-3 (i.e. colour 7, yellow),
-                        ; for the explosion sprite
+ LDA #1
+ STA VIC+$26
 
  LDA #%00000000         ; Clear bits 0 to 7 of VIC register $1C to set all seven
  STA VIC+$1C            ; sprites to single colour
@@ -1237,7 +1235,8 @@ ENDIF
 
  BNE LOOP13             ; Loop back until we have copied a second page of bytes
 
- JMP $CE0E              ; This loader was originally run from the GMA1 disk
+ RTS                    ; Return to the Kawari standard-file boot loader
+                        ; This loader was originally run from the GMA1 disk
                         ; loader, which set a return address in $CE0E before
                         ; running the above
                         ;

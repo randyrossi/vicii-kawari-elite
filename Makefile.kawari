@@ -1,0 +1,30 @@
+# Only the PAL Kawari target is supported.
+BEEBASM ?= $(if $(wildcard ../tools/beebasm-new/build/beebasm),../tools/beebasm-new/build/beebasm,beebasm)
+PYTHON ?= python3
+C1541 ?= c1541
+DISK = 5-compiled-game-disks/elite-kawari-pal.d64
+
+.PHONY: all c64-build c64-disk check
+all: c64-disk
+
+check: c64-build
+	$(PYTHON) 2-build-files/tests/test_kawari.py
+
+c64-build:
+	$(PYTHON) 2-build-files/kawari-build.py options $(commander)
+	$(BEEBASM) -i 1-source-files/main-sources/elite-data.asm -v > 3-assembled-output/kawari-compile.txt
+	$(BEEBASM) -i 1-source-files/main-sources/elite-sprites.asm -v >> 3-assembled-output/kawari-compile.txt
+	$(BEEBASM) -i 1-source-files/main-sources/elite-source.asm -v -d -labels 3-assembled-output/labels.txt >> 3-assembled-output/kawari-compile.txt
+	$(BEEBASM) -i 1-source-files/main-sources/elite-loader.asm -v >> 3-assembled-output/kawari-compile.txt
+	$(PYTHON) 2-build-files/elite-checksum.py -u -rel2
+	$(BEEBASM) -i 1-source-files/main-sources/kawari-cpu.asm -d -labels 3-assembled-output/cpu-labels.txt
+	$(BEEBASM) -i 1-source-files/main-sources/kawari-boot.asm
+	$(BEEBASM) -i 1-source-files/main-sources/kawari-launch.asm
+
+c64-disk: c64-build
+	$(C1541) -format 'elite kawari,kw' d64 $(DISK) -attach $(DISK) \
+	  -write 3-assembled-output/launch.prg elite \
+	  -write 3-assembled-output/elite-kawari.prg kawari \
+	  -write 3-assembled-output/gma4.bin gma4 \
+	  -write 3-assembled-output/gma5.bin gma5 \
+	  -write 3-assembled-output/gma6.bin gma6

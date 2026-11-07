@@ -14,6 +14,8 @@
 
 from __future__ import print_function
 import sys
+import re
+from pathlib import Path
 
 argv = sys.argv
 encrypt = True
@@ -36,14 +38,14 @@ print("Encryption = ", encrypt)
 
 # Configuration variables for scrambling code and calculating checksums
 #
-# Values must match those in 3-assembled-output/compile.txt
+# Values must match those in 3-assembled-output/kawari-compile.txt
 #
 # If you alter the source code, then you should extract the correct values for
 # the following variables and plug them into the following, otherwise the game
 # will fail the checksum process and will hang on loading
 #
 # You can find the correct values for these variables by building your updated
-# source, and then searching compile.txt for "elite-checksum.py", where the new
+# source, and then searching kawari-compile.txt for "elite-checksum.py", where the new
 # values will be listed
 
 if release == 1 or release == 2:
@@ -80,6 +82,10 @@ elif release == 3 or release == 4:
     padding_comlod = b''
     padding_locode = b''
     padding_hicode = b''
+
+# Read the relocated commander's address from the assembler's report.
+address_report = Path("3-assembled-output/kawari-compile.txt").read_text()
+na2_per_cent = int(re.search(r"NA2% =\s*&([0-9A-Fa-f]+)", address_report)[1], 16)
 
 # Load assembled code files that make up the LOCODE and HICODE files
 
@@ -269,32 +275,5 @@ output_file.close()
 
 print("versions/c64/3-assembled-output/gma4.bin file saved")
 
-# Load assembled code file for gma1
-
-data_block = bytearray()
-
-elite_file = open("3-assembled-output/gma1.bin", "rb")
-data_block.extend(elite_file.read())
-elite_file.close()
-
-# Disable the disk protection in gma1
-
-if release == 2:
-    # GMA86 PAL
-    data_block[0x25] = 0xEA
-    data_block[0x26] = 0xEA
-    data_block[0x27] = 0xEA
-    data_block[0x2C] = 0xD0
-else:
-    # GMA85 NTSC and source disk
-    data_block[0x14] = 0xEA
-    data_block[0x16] = 0xEA
-    data_block[0x15] = 0xEA
-
-# Write output file for gma1.unprot.bin
-
-output_file = open("3-assembled-output/gma1.unprot.bin", "wb")
-output_file.write(data_block)
-output_file.close()
-
-print("versions/c64/3-assembled-output/gma1.unprot.bin file saved")
+# Kawari boots through the standard KERNAL loader. No copy-protected gma1
+# bootstrap is used or required as an input to this build.
