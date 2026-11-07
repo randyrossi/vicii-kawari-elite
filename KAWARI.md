@@ -1,9 +1,11 @@
 # Elite for VIC-II Kawari (PAL)
 
 This build replaces the upper space/ship display with Kawari's packed-pixel
-320×200, 16-colour VRAM mode. Drawing is currently white on black. The original
-256-pixel-wide game view is centred in that display; the dashboard stays in
-legacy C64 DRAM, with its existing colours and raster split.
+320×200, 16-colour VRAM mode. The view is colour-coded: space ships are red
+(palette 2), space stations light blue (14), planets green (5), and suns and
+stardust stay white (1). The original 256-pixel-wide game view is centred in
+that display; the dashboard stays in legacy C64 DRAM, with its existing colours
+and raster split.
 
 ## Build and run
 
@@ -112,10 +114,12 @@ or reading results. It flushes when the next command would start at or above
 | 8 | byte-x, y, byte-width, height: clear text rectangle |
 | 9 | XOR side borders (used by the death scene) |
 
-Colours are already per-command four-bit values, although the host currently
-supplies white (1). Supporting per-object colours later also requires retaining
-the colour used by the previous frame's XOR erasure. Sprite sights/explosions
-are white; legacy menus and the dashboard retain their original colours.
+Colours are per-command four-bit values. The host selects `KW_COLOUR` per
+object before drawing: red for ships, light blue for the space station, green
+for planets, and white for suns and stardust. Our own laser beams are red as
+well. An object's colour is determined by its type, so the flicker-free XOR
+erasure redraws the previous frame's lines in the same colour. Legacy menus,
+charts and the dashboard retain their original colours.
 
 ## Verification
 
@@ -156,7 +160,7 @@ coverage of all missions, combat conditions and commander save/load cases is
 still recommended. The normal game save menu remains available; the automated
 disk test is read-only and checks the missing-file recovery path.
 
-The final full-1541-emulation run passed on 2026-11-07, with a sampled flight
-rate of 12.34 FPS and all eight copy samples at raster 199–245. A second build
-produced the same disk SHA-256:
-`f9aedcc782cc8fdda60a6f1d05f06b06a1dd3d541d7e2a188cbe3b9a4b0bfa3f`.
+The full-1541-emulation run passed on 2026-11-07 after the per-object colour
+change, with a sampled flight rate of 12.34 FPS and all eight copy samples at
+raster 199–245. A second build produced the same disk SHA-256:
+`98f443e07a6ae7fd9f11b3470558dcc0cb7594d6418d14f3e24e055251dd6237`.

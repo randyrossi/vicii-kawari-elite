@@ -13,6 +13,15 @@ KW_Y = $DD
 KW_SLOPE = $DE
 KW_BANK = $DF
 KW_PTR = $E0
+KW_COLOUR = $E2         ; Current drawing colour, as a packed-pixel palette
+                        ; index (see the KW_* colour values below)
+
+; 320x200x16 command colours: one nibble per pixel, indexing the 16-colour
+; palette (the same order as the C64's colour registers).
+KW_WHITE = 1
+KW_RED = 2
+KW_GREEN = 5
+KW_LIGHT_BLUE = 14
 
 MACRO KW_SAVE
  PHP

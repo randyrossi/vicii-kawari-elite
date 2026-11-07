@@ -7247,6 +7247,9 @@ ENDIF
 
 .PIXEL2
 
+ LDA #KW_WHITE          ; Stardust is drawn in white
+ STA KW_COLOUR
+
  LDA X1                 ; Fetch the x-coordinate offset into A
 
  BPL PX1                ; If the x-coordinate offset is positive, jump to PX1
@@ -16874,6 +16877,9 @@ ENDIF
 ;STA COL                ; source; they would switch to colour 2, which is red in
                         ; the space view
 
+ LDA #KW_RED            ; Lasers are red, as in the original colour version
+ STA KW_COLOUR
+
  LDA #32                ; Set A = 32 and Y = 224 for the first set of laser
  LDY #224               ; lines (the wider pair of lines)
 
@@ -24185,6 +24191,9 @@ ENDIF
 
 .DOEXP
 
+ LDA #KW_RED            ; Explosion clouds belong to a ship, so draw them red
+ STA KW_COLOUR
+
  LDA INWK+31            ; If bit 6 of the ship's byte #31 is clear, then the
  AND #%01000000         ; ship is not already exploding so there is no existing
  BEQ P%+5               ; explosion cloud to remove, so skip the following
@@ -26360,6 +26369,9 @@ ENDIF
 
 .PLANET
 
+ JSR KW_PLANET_COLOUR   ; Set the drawing colour for the planet or sun (green
+                        ; for a planet, white for the sun)
+
  LDA INWK+8             ; Set A = z_sign (the highest byte in the planet/sun's
                         ; coordinates)
 
@@ -27269,6 +27281,9 @@ ENDIF
 
 .SUN
 
+ LDA #KW_WHITE          ; The sun is a star, so keep it white
+ STA KW_COLOUR
+
  LDA #1                 ; Set LSX = 1 to indicate the sun line heap is about to
  STA LSX                ; be filled up
 
@@ -28007,6 +28022,9 @@ ENDIF
 
 .WPLS2
 
+ LDA #KW_GREEN          ; Removing a planet uses the planet colour
+ STA KW_COLOUR
+
  LDY LSX2               ; If LSX2 is non-zero (which indicates the ball line
  BNE WP1                ; heap is empty), jump to WP1 to reset the line heap
                         ; without redrawing the planet
@@ -28128,6 +28146,9 @@ ENDIF
 ; ******************************************************************************
 
 .WPLS
+
+ LDA #KW_WHITE          ; Removing a sun uses the star colour
+ STA KW_COLOUR
 
  LDA LSX                ; If LSX < 0, the sun line heap is empty, so return from
  BMI WPLS-1             ; the subroutine (as WPLS-1 contains an RTS)
@@ -38085,6 +38106,9 @@ ENDIF
 
  LDA TYPE               ; If the ship type is negative then this indicates a
  BMI LL25               ; planet or sun, so jump to PLANET via LL25 above
+
+ JSR KW_SHIP_COLOUR     ; Set the drawing colour for this ship (red, or light
+                        ; blue for the space station)
 
  LDA #31                ; Set XX4 = 31 to store the ship's distance for later
  STA XX4                ; comparison with the visibility distance. We will

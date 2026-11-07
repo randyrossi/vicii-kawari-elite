@@ -10,6 +10,8 @@
  STA $D035
  STA $D039
  STA $D03C
+ LDA #KW_WHITE
+ STA KW_COLOUR
  LDA #$1C
  STA KW_WRITE+1
  LDA #$80
@@ -190,7 +192,7 @@
  STA $D03B
  LDA Y2
  STA $D03B
- LDA #1               ; per-command colour: white for now
+ LDA KW_COLOUR        ; per-command colour
  STA $D03B
  JSR KW_CLOSE
  KW_RESTORE
@@ -225,13 +227,42 @@
  STA $D03B
  LDA ZZ
  STA $D03B
- LDA #1
+ LDA KW_COLOUR
  STA $D03B
  JSR KW_CLOSE
  KW_RESTORE
 .KW_PIXEL_LEGACY
  PLA
  JMP KW_OLD_PIXEL
+
+; Select the colour for the current ship in TYPE. The space station is light
+; blue; all other ships, including the player's Cobra, cargo and escape pods,
+; are red.
+.KW_SHIP_COLOUR
+ LDA TYPE
+ CMP #SST
+ BEQ KW_SHIP_COLOUR_STATION
+ LDA #KW_RED
+ BNE KW_SHIP_COLOUR_STORE  ; always taken, as KW_RED is non-zero
+.KW_SHIP_COLOUR_STATION
+ LDA #KW_LIGHT_BLUE
+.KW_SHIP_COLOUR_STORE
+ STA KW_COLOUR
+ RTS
+
+; Planets are green, while suns are stars and stay white.
+.KW_PLANET_COLOUR
+ LDA TYPE
+ AND #1
+ BNE KW_PLANET_COLOUR_SUN
+ LDA #KW_GREEN
+ BNE KW_PLANET_COLOUR_STORE ; always taken, as KW_GREEN is non-zero
+.KW_PLANET_COLOUR_SUN
+ LDA #KW_WHITE
+.KW_PLANET_COLOUR_STORE
+ STA KW_COLOUR
+ RTS
+
 .KW_CHAR
  LDA L1M              ; KERNAL messages use its swapped zero page, not ours
  CMP #6
@@ -332,6 +363,8 @@
  KW_RESTORE
 .KW_CLEAR
  KW_SAVE
+ LDA #KW_WHITE
+ STA KW_COLOUR
  JSR KW_FLUSH
  LDA #0
  STA KW_ACTIVE
