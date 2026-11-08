@@ -208,10 +208,14 @@ class Test:
         for _ in range(8):
             m = self.stop_at("KW_COPY_WAIT")
             start = m.memory(0xd012, 1, 3)[0] | ((m.memory(0xd011, 1, 3)[0] & 128) << 1)
-            assert 194 <= start < 270, start
+            # The copy outruns the beam: any start after raster 148 is
+            # tear-free, and it must finish before the first visible row.
+            # (sampled just after the start, so it may have wrapped to 0..3)
+            assert 148 <= start < 312 or start < 4, start
             m = self.stop_at("KW_FRAME_COUNTED", m)
             end = m.memory(0xd012, 1, 3)[0] | ((m.memory(0xd011, 1, 3)[0] & 128) << 1)
-            assert 194 <= end < 312 or end < 40, end
+            assert 148 <= end < 312 or end < 50, end
+            assert (end - start) % 312 <= 60, (start, end)
             samples.append([start, end])
             m.resume()
         self.report["copy_raster_intervals"] = samples

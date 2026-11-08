@@ -1,8 +1,12 @@
 ; Native NMOS 6502 code, assembled at its execution address in VRAM.
 ; $0000-$01ff private zero page/stack, $0200-$0fff code/tables,
-; $1000-$1bff stardust code, $1c00-$1fff commands,
+; $1000-$1bff stardust and ship code, $1c00-$1d61 and $1e00-$1f61 command
+; buffers, $1d62-$1dff and $1f62-$1fff planet code,
 ; $2000-$79ff working image (320 x 144),
-; $7a00-$7bff row tables, $7ff0 mailbox, $8000-$ffff display allocation.
+; $7a00-$7b1f row tables, $7b20-$7bff ball line heap (x, y), $7c00-$7c6e results, $7c70-$7fef movement code,
+; $7ff0 mailbox, $8000-$d9ff displayed rows, $da00-$da9f always zero (hires
+; row 144, shown on raster 195 before the split takes effect), $daa0-$f98c ship blueprints,
+; $f990-$fa57 space station line heap, $fa72-$ffbf ship line heaps.
 CPU 0
 cmd = $00
 dst = $02
@@ -23,6 +27,7 @@ slope = $11
 row = $12
 bits = $13
 linecarry = $14
+stars_resident = $15
 v_input = $20
 v_matrix = $26
 v_p = $40
@@ -33,8 +38,26 @@ v_t = $44
 v_widget = $45
 v_result = $7C00
 rowlo = $7A00
-rowhi = $7B00
+rowhi = $7A90
 mailbox = $7FF0
+; Planet job (kawari-planet.asm) heap and workspace
+pl_LSX2 = $7B20                 ; 112 bytes each. A frame makes at most ~68
+pl_LSY2 = $7B90                 ; BLINE calls (circle plus two meridians, or
+                                ; a crater), each adding one point, or two
+                                ; after a break, which itself adds one $FF:
+                                ; at most ~1.5 per call, about 103 in all
+pl_LSP = $74                    ; persistent heap pointer
+pl_K3 = $80                     ; K3(1 0) centre x, K3+2..K3+9 BLINE workspace
+pl_K4 = $8A                     ; two bytes
+pl_K5 = $8C                     ; four bytes
+pl_K6 = $90                     ; four bytes
+pl_K = $94
+pl_STP = $95
+pl_CNT = $96
+pl_T = $97
+pl_FLAG = $98
+pl_LSNUM = $99
+pl_LSNUM2 = $9A
 
 ORG $0200
 .entry
@@ -64,14 +87,26 @@ ORG $0200
  BNE build_rows
  LDA #0
  STA mailbox
+ STA MV_URGENT
+ STA pl_LSP             ; the ball line heap starts empty
+ LDA #$FF
+ STA pl_LSX2
+ STA pl_LSY2
 .idle
+ LDA MV_URGENT
+ BEQ idle_mailbox
+ JSR urgent_run
+.idle_mailbox
  LDA mailbox
  BEQ idle
+ STA cmd+1             ; the mailbox holds the command list's start page
  LDA #0
  STA cmd
- LDA #$1C
- STA cmd+1
 .dispatch
+ LDA MV_URGENT
+ BEQ dispatch_command
+ JSR urgent_run
+.dispatch_command
  LDY #0
  LDA (cmd),Y
  BEQ complete
@@ -100,7 +135,9 @@ ORG $0200
  JMP advance
 .check_borders
  CMP #9
- BNE invalid_command
+ BEQ borders_command
+ JMP check_ship
+.borders_command
  JSR borders
  LDA #1
  JMP advance
@@ -155,6 +192,55 @@ ORG $0200
  INC cmd+1
 .advance_ready
  JMP dispatch
+.check_ship
+ CMP #10
+ BNE check_lines
+ JSR ship_command
+ LDA #41
+ JMP advance
+.check_lines
+ CMP #11
+ BNE check_move
+ JSR lines_command
+ LDY #5
+ LDA (cmd),Y
+ ASL A
+ ASL A
+ CLC
+ ADC #6
+ JMP advance
+.check_move
+ CMP #12
+ BNE check_planet
+ JSR move_command
+ LDA #6
+ JMP advance
+.check_planet
+ CMP #14
+ BNE check_bline
+ JSR planet_circle_command
+ LDA #9
+ JMP advance
+.check_bline
+ CMP #15
+ BNE check_planet_op
+ JSR planet_bline_command
+ LDA #7
+ JMP advance
+.check_planet_op
+ CMP #16
+ BNE check_stars_resident
+ JSR planet_op_command
+ LDA #3
+ JMP advance
+.check_stars_resident
+ CMP #17
+ BEQ stars_resident_dispatch
+ JMP invalid_command
+.stars_resident_dispatch
+ JSR stars_resident_command
+ LDA #18
+ JMP advance
 .read_line
  LDY #1
  LDA (cmd),Y
@@ -700,6 +786,10 @@ ORG $0200
  EOR #%11111111
  ADC #1
  RTS
+ INCLUDE "1-source-files/main-sources/kawari-clip.asm"
+ INCLUDE "1-source-files/main-sources/kawari-movemath.asm"
+ INCLUDE "1-source-files/main-sources/kawari-bline.asm"
+ PRINT "Main co-processor code ends at ", ~P%
  ASSERT P% <= $0B00
 ORG $0B00
 .tilelo
@@ -726,7 +816,13 @@ ORG $0C00
  EQUB HI(INT(2^((n / 2 + 128.25) / 16) + 0.5))
  NEXT
 ORG $1000
+.stars_resident_command ; command 17: the particles are already in VRAM
+ LDA #$FF
+ BNE stars_common       ; (never BIT: the emulator's BIT changes C)
 .stars_command
+ LDA #0
+.stars_common
+ STA stars_resident
  LDY #1
  LDX #0
 .stars_controls
@@ -736,6 +832,8 @@ ORG $1000
  INX
  CPX #17
  BNE stars_controls
+ LDA stars_resident
+ BNE stars_run
  LDX #0
 .stars_particles
  LDA (cmd),Y
@@ -744,6 +842,7 @@ ORG $1000
  INX
  CPX #78
  BNE stars_particles
+.stars_run
  JSR st_STARS
  LDX #3
 .stars_random
@@ -753,5 +852,28 @@ ORG $1000
  BPL stars_random
  RTS
  INCLUDE "1-source-files/main-sources/kawari-stars.asm"
+ INCLUDE "1-source-files/main-sources/kawari-ship.asm"
+ PRINT "Stardust and ship code ends at ", ~P%
  ASSERT P% <= $1C00
- SAVE "3-assembled-output/kawari-cpu.bin", $0200, $1C00
+
+; Each command buffer ($1C00, $1E00) holds at most $161 bytes, as the host
+; never starts a command beyond the buffer's first page and the largest is
+; 97 bytes plus END. Code fills the rest of each pair of pages.
+ORG $1D62
+ INCLUDE "1-source-files/main-sources/kawari-planet.asm"
+ PRINT "Planet commands end at ", ~P%
+ ASSERT P% <= $1E00
+ORG $1F62
+ INCLUDE "1-source-files/main-sources/kawari-circle.asm"
+ PRINT "Planet circle ends at ", ~P%
+ ASSERT P% <= $2000
+ SAVE "3-assembled-output/kawari-cpu.bin", $0200, $2000
+
+; Second code block, between the result area and the mailbox. It is uploaded
+; separately by the boot loader (the whole $7C00-$7FFF page range).
+ORG $7C70
+ INCLUDE "1-source-files/main-sources/kawari-move.asm"
+ INCLUDE "1-source-files/main-sources/kawari-sine.asm"
+ PRINT "High co-processor code ends at ", ~P%
+ ASSERT P% <= MV_ARGS
+ SAVE "3-assembled-output/kawari-cpu-hi.bin", $7C00, $8000

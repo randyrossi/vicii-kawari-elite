@@ -14,6 +14,7 @@
  STA KW_COLOUR
  LDA #$1C
  STA KW_WRITE+1
+ STA KW_BUF
  LDA #$80
  STA $D03A
  LDA #$7D
@@ -26,6 +27,7 @@
 .KW_INIT_WAIT
  LDA $D036
  BNE KW_INIT_WAIT
+ JSR KW_BLUEPRINTS     ; after the clear, which also covers this area
  LDA #1
  STA $D038             ; display base $8000
  LDA #0
@@ -72,7 +74,12 @@
 .KW_STARS
  KW_SAVE
  JSR KW_OPEN
+ LDA KW_STARS_DIRTY    ; command 7 uploads the particles as well, command 17
+ BEQ KW_STARS_RESIDENT ; uses those already in VRAM
  LDA #7
+ EQUB $2C              ; skip the next instruction
+.KW_STARS_RESIDENT
+ LDA #17
  STA $D03B
  LDX #0
  LDY #0
@@ -87,6 +94,8 @@
  STA $D03B
  CPX #34
  BNE KW_STARS_CONTROLS
+ LDA KW_STARS_DIRTY
+ BEQ KW_STARS_QUEUED
  LDX #0
 .KW_STARS_PARTICLES
  LDA SX,X
@@ -94,21 +103,25 @@
  INX
  CPX #78
  BNE KW_STARS_PARTICLES
+ STY KW_STARS_DIRTY    ; Y = 0: VRAM now holds the particles
+.KW_STARS_QUEUED
  JSR KW_CLOSE
+ JSR KW_KICK           ; the stardust is drawn while the host carries on
+ KW_RESTORE
+; The co-processor owns the stardust particles between frames (it moves
+; them; the host only needs them when FLIP swaps their coordinates, and nWq
+; replaces them all). RAND is sent each frame but not read back, so stardust
+; respawning no longer advances the host's random sequence.
+.KW_STARS_FETCH        ; FLIP: wait for the stardust, read it, then modify it
+ KW_SAVE
  JSR KW_FLUSH
  LDA #1
  STA $D03F
- LDA #$1D
+ STA KW_STARS_DIRTY
+ LDA #$21
  STA $D039
  LDA #$7C
  STA $D03A
- LDX #0
-.KW_STARS_RANDOM
- LDA $D03B
- STA RAND,X
- INX
- CPX #4
- BNE KW_STARS_RANDOM
  LDX #0
 .KW_STARS_RESULT
  LDA $D03B
@@ -117,15 +130,26 @@
  CPX #78
  BNE KW_STARS_RESULT
  KW_RESTORE
+.KW_STARS_DIRTY
+ EQUB 1                ; nonzero when the host has changed the particles
 .KW_STARS_ADDR
  EQUW VIEW,NOSTM,DELTA,DELT4,DELT4+1,ALPHA,ALP1,ALP2,ALP2+1
  EQUW BETA,BET1,BET2,BET2+1,RAND,RAND+1,RAND+2,RAND+3
 
+; Command lists are double-buffered: two buffers at $1C00 and $1E00, each
+; at most $161 bytes, as co-processor code follows each one. A command only
+; starts in its buffer's first page, so even the largest (96 bytes) and the
+; END byte end by $160. The host fills the current buffer (KW_BUF) while the
+; co-processor may run the other one. Submitting writes the END byte, then
+; the buffer's start page to the mailbox; the co-processor clears the mailbox
+; when it has finished. The host only switches buffers while the
+; co-processor is idle, so it never writes a buffer that is still being read.
 .KW_OPEN
  LDA KW_WRITE+1
- CMP #$1F             ; reserve a whole page for the largest command
- BCC KW_SPACE
- JSR KW_FLUSH
+ CMP KW_BUF
+ BEQ KW_SPACE          ; still in the first page: always room
+ JSR KW_WAIT           ; otherwise wait for the other buffer to finish and
+ JSR KW_SUBMIT         ; switch to it
 .KW_SPACE
  LDA #1
  STA KW_DIRTY
@@ -143,12 +167,34 @@
  LDA $D03A
  STA KW_WRITE+1
  RTS
-.KW_FLUSH
+; Start the queued commands without waiting, if the co-processor is idle.
+.KW_KICK
  LDA KW_WRITE
- BNE KW_SUBMIT
+ BNE KW_KICK_QUEUED
  LDA KW_WRITE+1
- CMP #$1C
- BEQ KW_FLUSH_DONE
+ CMP KW_BUF
+ BEQ KW_KICK_DONE
+.KW_KICK_QUEUED
+ JSR KW_IDLE
+ BNE KW_KICK_DONE
+ JMP KW_SUBMIT
+.KW_KICK_DONE
+ RTS
+; Z set when the co-processor is idle (mailbox clear).
+.KW_IDLE
+ LDA #0
+ STA $D03F
+ LDA #$F0
+ STA $D039
+ LDA #$7F
+ STA $D03A
+ LDA $D03B
+ RTS
+.KW_WAIT
+ JSR KW_IDLE
+ BNE KW_WAIT
+ RTS
+; Submit the current buffer (the co-processor must be idle) and switch.
 .KW_SUBMIT
  LDA #1
  STA $D03F
@@ -163,25 +209,89 @@
  STA $D039
  LDA #$7F
  STA $D03A
- LDA #1
- STA $D03B
-.KW_BUSY
- LDA $D03B
- BNE KW_BUSY
- STA KW_WRITE
- LDA #$1C
+ LDA KW_BUF
+ STA $D03B             ; mailbox = start page
+ EOR #2
+ STA KW_BUF
  STA KW_WRITE+1
-.KW_FLUSH_DONE
+ LDA #0
+ STA KW_WRITE
  RTS
+; Run everything queued and wait until the co-processor has finished.
+.KW_FLUSH
+ LDA KW_WRITE
+ BNE KW_FLUSH_QUEUED
+ LDA KW_WRITE+1
+ CMP KW_BUF
+ BEQ KW_BUSY
+.KW_FLUSH_QUEUED
+ JSR KW_WAIT
+ JSR KW_SUBMIT
+.KW_BUSY
+ JSR KW_IDLE
+ BNE KW_BUSY
+ RTS
+.KW_BUF
+ EQUB $1C              ; page of the buffer the host is filling
 
 .KW_LINE
  LDA KW_ACTIVE
  BNE KW_VRAM_LINE
  JMP KW_DRAM_LINE
 .KW_VRAM_LINE
+ LDA #1
+.KW_FAST_SEGMENT
+ ; Fast path for the common case: all-RAM banking (L1M = 4) and room in the
+ ; buffer's first page. L1M is changed before the port, so an interrupt in
+ ; between still returns with the port matching L1M. Like the original LOIN
+ ; and HLOIN, this preserves X and Y but not A or the flags.
+ STA KW_ARG
+ LDA L1M
+ CMP #4
+ BNE KW_SLOW_SEGMENT
+ LDA KW_WRITE+1
+ CMP KW_BUF
+ BNE KW_SLOW_SEGMENT
+ LDA #5
+ STA L1M
+ LDA l1                ; %100 -> %101: I/O visible. ORA is idempotent, so an
+ ORA #1                ; interrupt that has already applied L1M is harmless
+ STA l1
+ LDA #1
+ STA KW_DIRTY
+ STA $D03F
+ LDA #0
+ STA $D035
+ LDA KW_WRITE
+ STA $D039
+ LDA KW_WRITE+1
+ STA $D03A
+ LDA KW_ARG
+ STA $D03B
+ LDA X1
+ STA $D03B
+ LDA Y1
+ STA $D03B
+ LDA X2
+ STA $D03B
+ LDA Y2
+ STA $D03B
+ LDA KW_COLOUR
+ STA $D03B
+ LDA $D039
+ STA KW_WRITE
+ LDA $D03A
+ STA KW_WRITE+1
+ LDA #4
+ STA L1M
+ LDA l1                ; back to all RAM (idempotent, as above)
+ AND #%11111110
+ STA l1
+ RTS
+.KW_SLOW_SEGMENT
  KW_SAVE
  JSR KW_OPEN
- LDA #1
+ LDA KW_ARG
 .KW_SEGMENT
  STA $D03B
  LDA X1
@@ -202,10 +312,8 @@
  LDA Y1
  CMP #144
  BCS KW_HLINE_LEGACY
- KW_SAVE
- JSR KW_OPEN
  LDA #2
- JMP KW_SEGMENT
+ JMP KW_FAST_SEGMENT
 .KW_HLINE_LEGACY
  JMP KW_OLD_HLOIN
 .KW_PIXEL
@@ -398,16 +506,20 @@
  PLP
  KW_SAVE
  JSR KW_FLUSH
- ; At PAL 8 bytes/cycle the 23040-byte copy needs 2880 cycles. Start
- ; in rows 194..249: it finishes before row 296, well before row 50.
+ ; At PAL 8 bytes/cycle the 23040-byte copy needs 2880 cycles (46 raster
+ ; lines) and moves 3.15 image rows per line, so it outruns the beam. If
+ ; the beam has passed image row 98 (raster 148) when the copy starts, the
+ ; copy cannot catch it before the beam leaves row 143: every row is shown
+ ; wholly old or wholly new this frame, and wholly new from the next. A
+ ; start as late as raster 311 still finishes by raster 45, before the
+ ; first visible row (raster 50). So start anywhere in rasters 152..311.
 .KW_SAFE_RASTER
  BIT $D011
- BMI KW_SAFE_RASTER
+ BMI KW_RASTER_OK      ; rasters 256..311
  LDA $D012
- CMP #194
+ CMP #152
  BCC KW_SAFE_RASTER
- CMP #250
- BCS KW_SAFE_RASTER
+.KW_RASTER_OK
  LDA #15
  STA $D03F
  LDA #0
@@ -447,18 +559,14 @@
  ORA L1M
  STA l1
  RTS
-.KW_IRQ
- LDA moonflower,X
- STA VIC+$16
- LDA #$48             ; 320x200, legacy badlines allowed, hires off
- CPX #0
- BNE KW_IRQ_SET
- LDA KW_ACTIVE
- BEQ KW_IRQ_SET
+.KW_IRQ               ; COMIRQ1 has just turned hires off ($48, timing
+ CPX #0                ; critical at the lower split); at the upper split
+ BNE KW_IRQ_DONE       ; (raster 40, in the border) turn it on for the
+ LDA KW_ACTIVE         ; VRAM views
+ BEQ KW_IRQ_DONE
  LDA #$58
-.KW_IRQ_SET
- ORA #$48
  STA $D037
+.KW_IRQ_DONE
  RTS
 
 ; Exact unsigned multiply, performed by the host because the co-processor
@@ -617,3 +725,78 @@
 .KW_STEP_UP
  DEC KW_Y
  RTS
+
+
+; MVEIT parts 2-7 for a ship, on the co-processor's urgent lane: write the
+; arguments to MV_ARGS ($7FC0), set MV_URGENT ($7FF2), wait for it to clear
+; and read the moved ship back from co-processor zero page ($0050). Queued
+; drawing is not flushed, so it carries on around the movement job. The
+; transfers are unrolled, as this runs for every ship on every frame.
+.KW_MOVE
+ LDY #15               ; maximum speed, read before KW_SAVE maps I/O over
+ LDA (XX0),Y           ; the blueprints at $D000-$DFFF
+ STA KW_ARG
+ KW_SAVE
+ JSR KW_KICK           ; start any queued drawing first
+ LDA #1                ; auto-increment, register overlay off
+ STA $D03F
+ LDA #0
+ STA $D035
+ LDA #$C0
+ STA $D039
+ LDA #$7F
+ STA $D03A
+ FOR n, 0, 30
+  LDA INWK+n
+  STA $D03B
+ NEXT
+ LDA ALPHA
+ STA $D03B
+ LDA ALP1
+ STA $D03B
+ LDA ALP2
+ STA $D03B
+ LDA ALP2+1
+ STA $D03B
+ LDA BETA
+ STA $D03B
+ LDA BET1
+ STA $D03B
+ LDA BET2
+ STA $D03B
+ LDA BET2+1
+ STA $D03B
+ LDA DELTA
+ STA $D03B
+ LDA KW_ARG            ; maximum speed
+ STA $D03B
+ LDA #$F2
+ STA $D039
+ LDA #1
+ STA $D03B             ; MV_URGENT = 1
+ LDA #0                ; no auto-increment while polling
+ STA $D03F
+ LDA #$F2
+ STA $D039
+.KW_MOVE_WAIT
+ LDA $D03B
+ BNE KW_MOVE_WAIT
+ LDA #1
+ STA $D03F
+ LDA #$50              ; the co-processor's mv_INWK
+ STA $D039
+ LDA #0
+ STA $D03A
+ LDX #0
+.KW_MOVE_READ
+ LDA $D03B             ; two bytes per iteration (31 = 15 * 2 + 1)
+ STA INWK,X
+ LDA $D03B
+ STA INWK+1,X
+ INX
+ INX
+ CPX #30
+ BNE KW_MOVE_READ
+ LDA $D03B
+ STA INWK+30
+ KW_RESTORE

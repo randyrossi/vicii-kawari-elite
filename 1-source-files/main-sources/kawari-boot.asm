@@ -39,20 +39,16 @@ ORG $07FF
  STA $D039
  LDA #2
  STA $D03A
- LDA #LO(engine_image)
- STA $FB
  LDA #HI(engine_image)
- STA $FC
- LDY #0
- LDX #(engine_end-engine_image)/256
-.upload
- LDA ($FB),Y
- STA $D03B
- INY
- BNE upload
- INC $FC
- DEX
- BNE upload
+ LDX #(engine_hi-engine_image)/256
+ JSR upload
+ LDA #0                ; second block (movement code) at VRAM $7C00
+ STA $D039
+ LDA #$7C
+ STA $D03A
+ LDA #HI(engine_hi)
+ LDX #(engine_end-engine_hi)/256
+ JSR upload
  ; This page survives the loader's data relocations and both game loads.
 .relocate
  LDA $0900,X
@@ -61,6 +57,20 @@ ORG $07FF
  BNE relocate
  CLI
  JMP disk_loader
+.upload                ; copy X pages from page A to the VRAM port
+ STA $FC
+ LDA #0
+ STA $FB
+ TAY
+.upload_byte
+ LDA ($FB),Y
+ STA $D03B
+ INY
+ BNE upload_byte
+ INC $FC
+ DEX
+ BNE upload_byte
+ RTS
  ASSERT P% <= $0900
 
 ORG $CF00
@@ -107,5 +117,7 @@ ORG $0A00
 .engine_image
  INCBIN "3-assembled-output/kawari-cpu.bin"
  ALIGN 256
+.engine_hi
+ INCBIN "3-assembled-output/kawari-cpu-hi.bin"
 .engine_end
  SAVE "3-assembled-output/elite-kawari.prg", $07FF, engine_end
