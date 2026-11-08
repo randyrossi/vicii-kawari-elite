@@ -13,6 +13,7 @@ KW_Y = $DD
 KW_SLOPE = $DE
 KW_BANK = $DF
 KW_PTR = $E0
+KW_EX_RESULT = $7C00     ; co-processor EX_RESULT (explosion sprite position)
 KW_COLOUR = $E2         ; Current drawing colour, as a packed-pixel palette
                         ; index (see the KW_* colour values below)
 

@@ -559,6 +559,67 @@
  ORA L1M
  STA l1
  RTS
+; DOEXP's cloud on the co-processor (command 13). A = flags: bit 3 project
+; the ship and draw its new cloud, bit 7 also place the explosion sprite
+; (PTCLS2). KW_EXFLAGS (bit 6) says whether the old cloud is on screen and
+; must be erased first. The heap header (#0-#6) is the host's, as updated.
+.KW_EXPLODE
+ ORA KW_EXFLAGS
+ BNE KW_EXPLODE_SEND
+ RTS                   ; nothing on screen and nothing to draw
+.KW_EXPLODE_SEND
+ STA KW_EXFLAGS
+ LDA K%+6              ; as PTCLS leaves it (it also stirs RAND and RAND+2,
+ STA RAND+3            ; which now stay as they are)
+ KW_SAVE
+ LDA #13
+ JSR KW_SHIP_BODY
+ LDA KW_EXFLAGS
+ STA $D03B
+ LDY #0
+.KW_EXPLODE_HEADER
+ LDA (XX19),Y
+ STA $D03B
+ INY
+ CPY #7
+ BNE KW_EXPLODE_HEADER
+ LDA sprx
+ STA $D03B
+ LDA spry
+ STA $D03B
+ JSR KW_CLOSE
+ LDA KW_EXFLAGS
+ BMI KW_EXPLODE_SPRITE
+ JSR KW_KICK           ; start drawing while the host carries on
+ JMP KW_EXPLODE_DONE
+.KW_EXPLODE_SPRITE     ; once per explosion: wait for the sprite position
+ JSR KW_FLUSH
+ LDA #1
+ STA $D03F
+ LDA #0
+ STA $D035
+ STA $D039
+ LDA #HI(KW_EX_RESULT)
+ STA $D03A
+ LDA $D03B             ; valid
+ BEQ KW_EXPLODE_DONE
+ LDY $D03B             ; x
+ LDX $D03B             ; x high bit (0 or 1)
+ LDA VIC+$10
+ AND #%11111101
+ ORA exlook,X
+ STA VIC+$10
+ LDA $D03B             ; y
+ STA VIC+$3
+ STY VIC+$2
+ LDA VIC+$15
+ ORA #%00000010
+ STA VIC+$15
+.KW_EXPLODE_DONE
+ KW_RESTORE
+.KW_EXFLAGS
+ EQUB 0
+
 .KW_IRQ               ; COMIRQ1 has just turned hires off ($48, timing
  CPX #0                ; critical at the lower split); at the upper split
  BNE KW_IRQ_DONE       ; (raster 40, in the border) turn it on for the

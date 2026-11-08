@@ -30,13 +30,28 @@ linecarry = $14
 stars_resident = $15
 v_input = $20
 v_matrix = $26
-v_p = $40
-v_q = $41
-v_r = $42
-v_s = $43
-v_t = $44
-v_widget = $45
-v_result = $7C00
+v_q = $CB                       ; the vector routine is the original LL51: it
+v_r = $CC                       ; uses the ship job's Q, R, S, T (sh_Q...)
+v_s = $CD                       ; and FMLTU
+v_t = $CE
+v_result = $A0                  ; and writes XX12 (sh_XX12) directly
+tile_t = $40
+; Explosion clouds (command 13, kawari-explode.asm)
+ex_RAND = $16                   ; four bytes
+ex_K3 = $1A                     ; four bytes
+ex_U = $1E
+ex_TGT = $1F
+ex_CNT = $D8
+ex_ZZ = $D9
+ex_Y1 = $DA
+ex_flags = $DB
+ex_ptr = $DC                    ; two bytes
+ex_SPRX = $DE
+ex_SPRY = $DF
+ex_sprite = $41
+ex_SC = $42
+ex_YSAV = $43
+EX_RESULT = $7C00               ; sprite position: valid, x, x high, y
 rowlo = $7A00
 rowhi = $7A90
 mailbox = $7FF0
@@ -120,8 +135,8 @@ ORG $0200
  BEQ glyph_command
  CMP #5
  BEQ clear_command
- CMP #6
- BEQ vector_command
+ CMP #13
+ BEQ explode_dispatch
  CMP #7
  BNE check_clear_box
  JSR stars_command
@@ -171,18 +186,9 @@ ORG $0200
  JSR clear
  LDA #1
  BNE advance
-.vector_command
- LDY #1
- LDX #0
-.vector_input
- LDA (cmd),Y
- STA v_input,X
- INY
- INX
- CPX #24
- BNE vector_input
- JSR vector
- LDA #25
+.explode_dispatch
+ JSR explode_command
+ LDA #51
  BNE advance
 .advance
  CLC
@@ -334,8 +340,7 @@ ORG $0200
  LDX cy
  LDA cx
  AND #$F8
- CLC
- ADC tilelo,X
+ JSR tile_add
  CMP #248
  ROL linecarry
 .shallow_initialised
@@ -373,8 +378,7 @@ ORG $0200
  LDA cx
  AND #$F8
  LDX cy
- CLC
- ADC tilelo,X
+ JSR tile_add
  LDX step
  BMI shallow_carry_test
  CLC
@@ -525,14 +529,7 @@ ORG $0200
 ; Preserve PIXEL's actual two-bit masks (including its x=0 special case)
 ; and the original double-height rule at character-row boundaries.
 .point
- LDY #1
- LDA (cmd),Y
- STA cx
- AND #7
- BEQ point_x_ready
- DEC cx
-.point_x_ready
- INY
+ LDY #2
  LDA (cmd),Y
  STA cy
  INY
@@ -541,6 +538,13 @@ ORG $0200
  INY
  LDA (cmd),Y
  STA colour
+ LDY #1
+ LDA (cmd),Y
+.point_at               ; A = x, with cy, temp (ZZ) and colour set
+ STA cx
+ AND #7
+ BEQ point_render
+ DEC cx
 .point_render
  JSR point_row
  LDA temp
@@ -692,7 +696,7 @@ ORG $0200
  LDA v_input
  STA v_q
  LDA v_matrix,X
- JSR v_multiply
+ JSR sh_FMLTU
  STA v_t
  LDA v_input+1
  EOR v_matrix+1,X
@@ -700,7 +704,7 @@ ORG $0200
  LDA v_input+2
  STA v_q
  LDA v_matrix+2,X
- JSR v_multiply
+ JSR sh_FMLTU
  STA v_q
  LDA v_t
  STA v_r
@@ -711,7 +715,7 @@ ORG $0200
  LDA v_input+4
  STA v_q
  LDA v_matrix+4,X
- JSR v_multiply
+ JSR sh_FMLTU
  STA v_q
  LDA v_t
  STA v_r
@@ -730,38 +734,18 @@ ORG $0200
  CMP #17
  BCC vector_loop
  RTS
-.v_multiply
- STX v_p
- STA v_widget
- TAX
- BEQ v_return
- LDA loglo,X
- LDX v_q
- BEQ v_zero
+; A + tilelo[X], as CLC / ADC tilelo,X (same result and flags) with the
+; old table LO($20 + (X AND $F8) * 40) = $20 + (X AND $18) * 8.
+.tile_add
+ STA tile_t
+ TXA
+ AND #$18
+ ASL A
+ ASL A
+ ASL A
+ ORA #$20
  CLC
- ADC loglo,X
- BMI v_odd
- LDA loghi,X
- LDX v_widget
- ADC loghi,X
- BCC v_zero
- TAX
- LDA antilog,X
- LDX v_p
- RTS
-.v_odd
- LDA loghi,X
- LDX v_widget
- ADC loghi,X
- BCC v_zero
- TAX
- LDA antilog_odd,X
-.v_return
- LDX v_p
- RTS
-.v_zero
- LDA #0
- LDX v_p
+ ADC tile_t
  RTS
 .v_add
  EOR v_s
@@ -789,13 +773,9 @@ ORG $0200
  INCLUDE "1-source-files/main-sources/kawari-clip.asm"
  INCLUDE "1-source-files/main-sources/kawari-movemath.asm"
  INCLUDE "1-source-files/main-sources/kawari-bline.asm"
+ INCLUDE "1-source-files/main-sources/kawari-explode.asm"
  PRINT "Main co-processor code ends at ", ~P%
- ASSERT P% <= $0B00
-ORG $0B00
-.tilelo
- FOR n,0,255
- EQUB LO($20+(n AND $F8)*40)
- NEXT
+ ASSERT P% <= $0C00
 ORG $0C00
 .loghi
  EQUB 0

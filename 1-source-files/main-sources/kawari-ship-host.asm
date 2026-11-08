@@ -84,8 +84,22 @@ KW_LSO = $F990
 ; screen (bit 3) and that any laser shot has been drawn (bit 6 clear).
 .KW_SHIP
  KW_SAVE
- JSR KW_OPEN
  LDA #10
+ JSR KW_SHIP_BODY
+ JSR KW_CLOSE
+ JSR KW_KICK           ; start drawing while the host carries on
+ LDA XX1+31
+ ORA #%00001000
+ AND #%10111111
+ STA XX1+31
+ KW_RESTORE
+
+; Open command A (10, or 13 for an exploding ship) and send the ship job:
+; heap header, XX4, XX0, dontclip and the ship data block. I/O is mapped.
+.KW_SHIP_BODY
+ PHA
+ JSR KW_OPEN
+ PLA
  STA $D03B
  JSR KW_HEAP_HEADER
  LDA XX4
@@ -100,13 +114,7 @@ KW_LSO = $F990
   LDA XX1+n
   STA $D03B
  NEXT
- JSR KW_CLOSE
- JSR KW_KICK           ; start drawing while the host carries on
- LDA XX1+31
- ORA #%00001000
- AND #%10111111
- STA XX1+31
- KW_RESTORE
+ RTS
 
 ; SHPPT's two-row dot (KW_DOT) or nothing (KW_NODOT), replacing the ship's
 ; old lines (command 11). The caller updates bit 3 afterwards.

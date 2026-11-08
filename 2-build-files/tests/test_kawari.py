@@ -190,8 +190,11 @@ class Renderer(unittest.TestCase):
                                                0, 0, 0, 0, 10000), 0)
             expected = bytes(self.mem[0x71:0x77])
             self.start()
-            self.submit(bytes([6]) + data)
-            self.assertEqual(bytes(self.mem[0x7c00:0x7c06]), expected)
+            # The ship job's LL51: XX15 at $20, XX16 at $26, XX12 at $A0.
+            self.mem[0x20:0x38] = data
+            self.assertGreater(self.cpu.run_to(self.labels["vector"], 0x200,
+                                               0, 0, 0, 0, 10000), 0)
+            self.assertEqual(bytes(self.mem[0xa0:0xa6]), expected)
 
     def test_text_clear_and_border_removal(self):
         self.start()
@@ -359,6 +362,87 @@ class Renderer(unittest.TestCase):
             self.submit([11, heap & 255, heap >> 8, 8, colour, 0])
             self.assertEqual(self.pixels(colour), set())
             self.assertEqual(self.mem[heap], 1)
+
+    def test_explosion_matches_original(self):
+        """Command 13 reproduces stock LL9/DOEXP clouds, heap and sprite."""
+        rng = random.Random(13)
+        heap = 0xff00
+        vic = [0xd002, 0xd003, 0xd010, 0xd015, 0xd017, 0xd01d]
+        sprites = drawn = erased = particles = 0
+        for case in range(64):
+            ship_type = 1 + case % 32
+            colour = 2
+            blueprint = int.from_bytes(self.ships[2 * ship_type - 2:2 * ship_type], "little")
+            block = self.ship_block(rng, ship_type, self.ships, False)
+            block[31] = 0x20 | (block[31] & 7)          # exploding, nothing drawn
+            if case % 2:                                # close: large clouds
+                z = rng.randrange(0x80, 0x400)
+                for offset, v in [(0, rng.randrange(-z // 2, z // 2)),
+                                  (3, rng.randrange(-z // 2, z // 2)), (6, z)]:
+                    block[offset:offset + 3] = [abs(v) & 255, abs(v) >> 8,
+                                                0x80 if v < 0 else 0]
+            counter = 18 if case % 3 == 0 else rng.randrange(19, 236)
+            header = [0, counter, self.ships[blueprint - 0xd000 + 7]] + [
+                rng.randrange(256) for _ in range(4)]
+            reference = bytearray(self.reference)
+            reference[0x4000:0x6000] = bytes(0x2000)
+            reference[heap:heap + 7] = bytes(header)
+            self.start()
+            vram = bytearray(self.mem)
+            for frame in range(3):
+                with self.subTest(case=case, frame=frame, ship=ship_type):
+                    self.mem[:] = reference
+                    self.mem[0x09:0x09 + 32] = block
+                    self.mem[0x09 + 33:0x09 + 35] = heap.to_bytes(2, "little")
+                    self.mem[0x2d] = 0              # NEWB
+                    self.mem[0xa5] = ship_type      # TYPE
+                    self.mem[0x57:0x59] = blueprint.to_bytes(2, "little")
+                    self.mem[0xb7] = 0              # dontclip
+                    for a in vic:
+                        self.mem[a] = 0
+                    frump = self.mem[heap + 1]
+                    self.assertGreater(self.cpu.reference_run_to(
+                        self.stock_ll9, 0x200, 0, 0, 0, 0, 3000000), 0)
+                    reference = bytearray(self.mem)
+                    sprite_regs = [reference[a] for a in vic]
+                    reference[0xd000:0xd000 + len(self.ships)] = self.ships
+                    after = reference[0x09 + 31]
+                    draw = after & 0x40
+                    sprite = bool(draw) and frump == 18
+                    flags = (block[31] & 0x40) | (8 if draw else 0) | (0x80 if sprite else 0)
+                    sprx, spry = (44, 40) if block[7] >= 7 else (32, 30)
+                    new_header = list(reference[heap:heap + 7])
+                    self.mem[:] = vram
+                    self.mem[0x7c00:0x7c04] = b"\x55\x55\x55\x55"
+                    self.submit([13, heap & 255, heap >> 8, 0, colour, reference[0xad],
+                                 blueprint & 255, blueprint >> 8, 0] + block
+                                + [flags] + new_header + [sprx, spry])
+                    vram = bytearray(self.mem)
+                    expected = {(x, y) for y in range(144) for x in range(256)
+                                if reference[0x4020 + (y // 8) * 320 + (x // 8) * 8
+                                             + (y & 7)] & (128 >> (x & 7))}
+                    self.assertEqual(self.pixels(colour), expected)
+                    particles += len(expected)
+                    drawn += bool(draw)
+                    erased += bool(block[31] & 0x40)
+                    if draw:
+                        end = new_header[2] + 1
+                        self.assertEqual(bytes(self.mem[heap:heap + end]),
+                                         bytes(reference[heap:heap + end]))
+                    if sprite:
+                        valid = sprite_regs[3] & 2
+                        self.assertEqual(bool(self.mem[0x7c00]), bool(valid))
+                        if valid:
+                            sprites += 1
+                            self.assertEqual(self.mem[0x7c01], sprite_regs[0])
+                            self.assertEqual(self.mem[0x7c03], sprite_regs[1])
+                            self.assertEqual(self.mem[0x7c02], sprite_regs[2] >> 1 & 1)
+                    block = block[:31] + [after]
+        self.assertGreater(sprites, 5)
+        self.assertGreater(drawn, 150)
+        self.assertGreater(erased, 100)
+        self.assertGreater(particles, 3000)
+        print(f"explosions: {drawn} drawn, {erased} erased, {sprites} sprites, {particles} pixels")
 
     def test_ship_dots_and_heap_moves(self):
         self.start()

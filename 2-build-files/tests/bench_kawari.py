@@ -59,6 +59,18 @@ def spawn(test, scene):
     m.resume()
 
 
+def explode(test):
+    """Kill every ship in the local bubble, so they all explode at once."""
+    m = test.stop_at("MLOOP")
+    frin = m.memory(test.labels["FRIN"], 11)
+    for slot, ship_type in enumerate(frin):
+        if 0 < ship_type < 128:
+            block = test.labels["K%"] + slot * 37
+            flags = m.memory(block + 31, 1)[0]
+            m.write(block + 31, [flags | 0x80])
+    m.resume()
+
+
 def jsr_targets(test):
     """Addresses of JSR instructions in the assembled host code."""
     game = Path(test.labels and __file__).resolve().parents[2] / "3-assembled-output"
@@ -183,6 +195,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scene", choices=SCENES, default="fleet")
     parser.add_argument("--samples", type=int, default=300)
+    parser.add_argument("--explode", action="store_true",
+                        help="destroy the scene's ships, then measure the explosions")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--breakdown", type=int, default=3,
                         help="frames to measure exactly (0 to skip)")
@@ -210,6 +224,26 @@ def main():
         time.sleep(1.5)
         spawn(test, options.scene)
         time.sleep(0.5)
+        if options.explode:
+            explode(test)
+            # Explosions last about 60 frames: measure them at once, by
+            # emulated cycles over whole frames rather than wall time.
+            m = test.stop_at("MLOOP")
+            m = test.stop_at("MLOOP", m)    # past the first explosion frame
+            test.screenshot(m, "explosion-start")
+            begin = test.clock(m, "explode-start")
+            frames = 20
+            for _ in range(frames):
+                m = test.stop_at("MLOOP", m)
+            end = test.clock(m, "explode-end")
+            test.screenshot(m, "explosion")
+            fps = frames * 985248 / (end - begin)
+            test.report["explosion_fps"] = fps
+            print(f"Explosions: {fps:.1f} FPS ({(end - begin) / frames:.0f} cycles per frame)")
+            m.resume()
+            if options.breakdown:
+                test.report["breakdown"] = breakdown(test, options.breakdown)
+            options.breakdown = 0
         m = test.stop_at("MLOOP")
         test.screenshot(m, "scene-" + options.scene)
         m.resume()

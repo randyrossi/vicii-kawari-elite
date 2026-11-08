@@ -176,6 +176,11 @@
  LDA #255
  STA sh_XX2+15
  LDY #12
+ LDA sh_XX1+31          ; exploding (command 13): all faces visible (EE30)
+ AND #%00100000
+ BEQ sh_LL17_faces
+ JMP ex_EE30
+.sh_LL17_faces
  LDA (sh_XX0),Y
  BNE sh_EE29
  JMP sh_LL42
@@ -699,7 +704,13 @@
  JMP sh_LL48
 
 ; LL72/EE31/LL74: the host sets bit 3 and clears bit 6 of byte #31 itself.
+; An exploding ship draws its particle cloud instead (DOEXP).
 .sh_LL72
+ LDA sh_XX1+31
+ AND #%00100000
+ BEQ sh_LL72_lines
+ JMP ex_draw
+.sh_LL72_lines
  LDY #9
  LDA (sh_XX0),Y
  STA sh_XX20
@@ -917,16 +928,8 @@
  LDY sh_YSAV
  RTS
 
-; LL51: XX12 = XX16 . XX15, using the shared vector routine.
-.sh_LL51
- JSR vector
- LDX #5
-.sh_LL51_copy
- LDA v_result,X
- STA sh_XX12,X
- DEX
- BPL sh_LL51_copy
- RTS
+; LL51: XX12 = XX16 . XX15 (the shared vector routine writes XX12).
+sh_LL51 = vector
 
 .sh_LL28
  CMP sh_Q
