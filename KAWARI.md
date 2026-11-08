@@ -85,7 +85,11 @@ so it outruns the beam: started once the beam has passed image row 98 (raster
 or wholly new for that frame, and wholly new from the next. Started as late as
 raster 311 it still finishes by raster 45, before the first visible row (50).
 The host therefore starts it anywhere in rasters 152–311. Thus the viewer sees
-a completed frame, not the intermediate XOR erase/redraw. Title, mission,
+a completed frame, not the intermediate XOR erase/redraw. For the same
+reason a beam or military laser, which the original draws and erases within
+one loop of the main flight loop, is erased at the start of the next loop's
+laser code instead (just before any new beams are drawn), so every published
+frame shows it while firing; pulse lasers are unchanged. Title, mission,
 flight, death, escape-pod and tunnel loops have explicit frame boundaries;
 keyboard waits also publish pending text.
 

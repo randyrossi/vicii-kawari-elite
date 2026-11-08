@@ -3666,6 +3666,12 @@ ENDIF
  ROR DELT4
  STA DELT4+1
 
+ LDA KW_LASPEND         ; Kawari: erase a beam or military laser drawn in the
+ BEQ P%+10              ; previous loop (see MA23), in the same frame as any
+ LDA #0                 ; new laser lines
+ STA KW_LASPEND
+ JSR LASLI2
+
  LDA LASCT              ; If LASCT is zero, keep going, otherwise the laser is
  BNE MA3                ; a pulse laser that is between pulses, so jump down to
                         ; MA3 to skip the following
@@ -5059,6 +5065,16 @@ ENDIF
                         ; does get drawn and removed every cycle, in a slightly
                         ; different place each time, so the beams still flicker
                         ; around the screen
+
+                        ; Kawari: a beam or military laser (LASCT = 0) would be
+ LDA LASCT              ; drawn and erased before the frame is published, so
+ BNE MA23_erase         ; it would never be seen; part 3 of the next loop
+ STA LAS2               ; erases it instead, just before drawing any new lines
+ LDA #1
+ STA KW_LASPEND
+ BNE MA16
+
+.MA23_erase
 
  JSR LASLI2             ; Redraw the existing laser lines, which has the effect
                         ; of removing them from the screen
@@ -39329,6 +39345,7 @@ ENDIF
 
  LDA #0                 ; Set LAS2 = 0 to stop any laser pulsing
  STA LAS2
+ STA KW_LASPEND         ; Kawari: the screen is clear, so no laser to erase
 
                         ; --- Mod: Code added for flicker-free planets: ------->
 

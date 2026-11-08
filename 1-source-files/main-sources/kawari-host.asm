@@ -620,6 +620,9 @@
 .KW_EXFLAGS
  EQUB 0
 
+.KW_LASPEND             ; a beam or military laser is on screen (MA23)
+ EQUB 0
+
 .KW_IRQ               ; COMIRQ1 has just turned hires off ($48, timing
  CPX #0                ; critical at the lower split); at the upper split
  BNE KW_IRQ_DONE       ; (raster 40, in the border) turn it on for the
