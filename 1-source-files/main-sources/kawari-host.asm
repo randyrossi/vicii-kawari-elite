@@ -133,8 +133,8 @@
 .KW_STARS_DIRTY
  EQUB 1                ; nonzero when the host has changed the particles
 .KW_STARS_ADDR
- EQUW VIEW,NOSTM,DELTA,DELT4,DELT4+1,ALPHA,ALP1,ALP2,ALP2+1
- EQUW BETA,BET1,BET2,BET2+1,RAND,RAND+1,RAND+2,RAND+3
+ EQUW VIEW,NOSTM,KW_SDELTA,KW_SDELT4,KW_SDELT4+1,KW_SALPHA,KW_SALP1,ALP2,ALP2+1
+ EQUW KW_SBETA,KW_SBET1,BET2,BET2+1,RAND,RAND+1,RAND+2,RAND+3
 
 ; Command lists are double-buffered: two buffers at $1C00 and $1E00, each
 ; at most $161 bytes, as co-processor code follows each one. A command only
@@ -506,6 +506,17 @@
  PLP
  KW_SAVE
  JSR KW_FLUSH
+ PHP                   ; frame cap: wait until KW_MIN_FIELDS fields have passed
+ PLA                   ; since the last frame (unless interrupts are off, when
+ AND #%00000100        ; no fields are counted)
+ BNE KW_CAP_DONE
+.KW_CAP
+ LDA KW_FIELDS
+ SEC
+ SBC KW_PRESENTED
+ CMP #KW_MIN_FIELDS
+ BCC KW_CAP
+.KW_CAP_DONE
  ; At PAL 8 bytes/cycle the 23040-byte copy needs 2880 cycles (46 raster
  ; lines) and moves 3.15 image rows per line, so it outruns the beam. If
  ; the beam has passed image row 98 (raster 148) when the copy starts, the
@@ -520,6 +531,8 @@
  CMP #152
  BCC KW_SAFE_RASTER
 .KW_RASTER_OK
+ LDA KW_FIELDS
+ STA KW_PRESENTED
  LDA #15
  STA $D03F
  LDA #0
@@ -626,7 +639,8 @@
 .KW_IRQ               ; COMIRQ1 has just turned hires off ($48, timing
  CPX #0                ; critical at the lower split); at the upper split
  BNE KW_IRQ_DONE       ; (raster 40, in the border) turn it on for the
- LDA KW_ACTIVE         ; VRAM views
+ INC KW_FIELDS         ; VRAM views, and count the field for KW_PACE
+ LDA KW_ACTIVE
  BEQ KW_IRQ_DONE
  LDA #$58
  STA $D037
@@ -814,25 +828,42 @@
   LDA INWK+n
   STA $D03B
  NEXT
- LDA ALPHA
+ LDA KW_SALPHA         ; our roll, pitch and speed, scaled to this frame
  STA $D03B
- LDA ALP1
+ LDA KW_SALP1
  STA $D03B
  LDA ALP2
  STA $D03B
  LDA ALP2+1
  STA $D03B
- LDA BETA
+ LDA KW_SBETA
  STA $D03B
- LDA BET1
+ LDA KW_SBET1
  STA $D03B
  LDA BET2
  STA $D03B
  LDA BET2+1
  STA $D03B
- LDA DELTA
+ LDA KW_SDELTA
  STA $D03B
  LDA KW_ARG            ; maximum speed
+ STA $D03B
+ LDA INWK+27           ; the ship's speed * 4, scaled to this frame (rounded)
+ ASL A
+ ASL A
+ LDX KW_SFULL
+ BNE KW_MOVE_SPEED
+ JSR KW_MULS
+ PHA
+ LDA KW_PM
+ ASL A
+ PLA
+ ADC #0
+.KW_MOVE_SPEED
+ STA $D03B
+ LDA KW_ROTQ           ; its own rotation step
+ STA $D03B
+ LDA KW_DECCMP         ; whether its roll and pitch counters count down
  STA $D03B
  LDA #$F2
  STA $D039
@@ -864,3 +895,524 @@
  LDA $D03B
  STA INWK+30
  KW_RESTORE
+
+; ******************************************************************************
+;
+; Real-time pacing
+;
+; The original game advances everything once per pass of the main loop, so
+; with faster drawing it would simply play faster. Instead the game logic
+; runs in game ticks at a fixed rate (KW_PACE_STEP, from "make pace=..."):
+; on a tick frame (KW_TICK = $FF) the main loop does everything it did
+; before, and between ticks (KW_TICK = 0) it only draws, scanning the keys
+; and moving things by the fraction of a tick that the frame took. Motion
+; therefore stays smooth at the higher frame rate while speeds, turning
+; rates, timers, AI, energy, lasers and spawning keep the original's pace.
+;
+; KW_S is that fraction in 1/256 ticks, unless KW_SFULL is $80 (a whole tick,
+; when every movement is done exactly as in the original). A frame never
+; counts for more than one tick, so the game slows down as the original did
+; if a frame takes longer than that.
+;
+; ******************************************************************************
+
+.KW_FIELDS
+ EQUB 0                ; PAL fields, counted by the raster interrupt
+.KW_PACE_LAST
+ EQUB 0                ; KW_FIELDS when KW_PACE last ran
+.KW_PACE_STEP
+ EQUW KW_PACE_INC      ; tick units per field (4096 = one tick); may be changed
+.KW_ACC
+ EQUW 0                ; tick units accumulated towards the next tick
+.KW_AMT
+ EQUW 0                ; tick units in this frame
+.KW_TICK
+ EQUB $FF              ; $FF when this frame is a game tick, 0 otherwise
+.KW_S
+ EQUB 0                ; this frame's share of a tick, in 1/256 ticks...
+.KW_SFULL
+ EQUB $80              ; ...unless this is $80 (a whole tick)
+.KW_SREM
+ EQUB 0                ; sixteenths of 1/256 tick carried into the next frame
+.KW_PACED
+ EQUB 0                ; nonzero when MLOOP has paced the frame for M%
+.KW_PM
+ EQUB 0                ; KW_MULS: product low byte
+.KW_RES
+ EQUB 0, 0, 0, 0       ; KW_SCALED: carried fractions (speed, roll, pitch, turn)
+.KW_SDELTA
+ EQUB 0                ; DELTA, scaled to this frame
+.KW_SDELT4
+ EQUW 0                ; DELT4, scaled to this frame
+.KW_SALPHA
+ EQUB 0                ; ALPHA and ALP1, scaled to this frame
+.KW_SALP1
+ EQUB 0
+.KW_SBETA
+ EQUB 0                ; BETA and BET1, scaled to this frame
+.KW_SBET1
+ EQUB 0
+.KW_ROTQ
+ EQUB $FF              ; ships' own rotation step ($FF: the original 1/16 rad)
+.KW_DECCMP
+ EQUB $7F              ; $7F on a tick (roll and pitch counters count down)
+.KW_LASWAS
+ EQUB 0                ; a beam or military laser was on screen last frame
+.KW_PRESENTED
+ EQUB 0                ; KW_FIELDS when the last frame was presented
+
+; Measure the time since the last frame and decide whether it is a tick.
+.KW_PACE
+ LDA KW_FIELDS
+ TAY
+ SEC
+ SBC KW_PACE_LAST
+ STY KW_PACE_LAST
+ TAX                   ; X = fields since the last frame
+ LDA #0
+ STA KW_AMT
+ STA KW_AMT+1
+ CPX #0
+ BEQ KW_PACE_SPLIT
+.KW_PACE_ADD
+ CLC
+ LDA KW_AMT
+ ADC KW_PACE_STEP
+ STA KW_AMT
+ LDA KW_AMT+1
+ ADC KW_PACE_STEP+1
+ STA KW_AMT+1
+ CMP #$10
+ BCS KW_PACE_WHOLE     ; a whole tick or more: count it as one tick
+ DEX
+ BNE KW_PACE_ADD
+ BEQ KW_PACE_SPLIT
+.KW_PACE_WHOLE
+ LDA #0
+ STA KW_AMT
+ LDA #$10
+ STA KW_AMT+1
+.KW_PACE_SPLIT
+ LDA KW_AMT+1
+ CMP #$10
+ ROR A
+ AND #%10000000
+ STA KW_SFULL          ; $80 for a whole tick
+ LDA KW_AMT            ; KW_S = (AMT + carried remainder) / 16, keeping the
+ AND #%00001111        ; remainder in KW_SREM so that motion keeps exact time
+ CLC                   ; with the ticks (a whole tick has none: AMT = 4096)
+ ADC KW_SREM
+ TAX
+ AND #%00001111
+ STA KW_SREM
+ TXA
+ LSR A
+ LSR A
+ LSR A
+ LSR A                 ; 0 or 1, carried into the next 1/256 tick
+ STA KW_S
+ LDA KW_AMT+1
+ ASL A
+ ASL A
+ ASL A
+ ASL A
+ ORA KW_S
+ STA KW_S
+ LDA KW_AMT
+ LSR A
+ LSR A
+ LSR A
+ LSR A
+ CLC
+ ADC KW_S
+ BCC P%+4
+ LDA #255              ; (just short of a whole tick)
+ STA KW_S
+ CLC                   ; KW_ACC += AMT, and a tick each time it reaches 4096
+ LDA KW_ACC
+ ADC KW_AMT
+ STA KW_ACC
+ LDA KW_ACC+1
+ ADC KW_AMT+1
+ LDX #0
+ CMP #$10
+ BCC KW_PACE_NOTICK
+ SBC #$10
+ DEX
+.KW_PACE_NOTICK
+ STA KW_ACC+1
+ STX KW_TICK
+ LDA #1
+ STA KW_PACED
+ RTS
+
+; (A KW_PM) = A * KW_S, unsigned.
+.KW_MULS
+ STA KW_PM
+ LDA #0
+ LDX #8
+ LSR KW_PM
+.KW_MULS_LOOP
+ BCC KW_MULS_SKIP
+ CLC
+ ADC KW_S
+.KW_MULS_SKIP
+ ROR A
+ ROR KW_PM
+ DEX
+ BNE KW_MULS_LOOP
+ RTS
+
+; A = A scaled to this frame, carrying the fraction in KW_RES+Y so that the
+; average over many frames is exact. Unchanged on a whole tick.
+.KW_SCALED
+ LDX KW_SFULL
+ BNE KW_SCALED_DONE
+ JSR KW_MULS
+ PHA
+ LDA KW_PM
+ CLC
+ ADC KW_RES,Y
+ STA KW_RES,Y
+ PLA
+ ADC #0
+.KW_SCALED_DONE
+ RTS
+
+; Our speed, roll and pitch for this frame, for the ship movement job, the
+; stardust and the planet and sun (MVEIT's MV40 and MV45 paths).
+.KW_MOTION
+ LDA DELTA
+ LDY #0
+ JSR KW_SCALED
+ STA KW_SDELTA
+ LDA ALP1
+ LDY #1
+ JSR KW_SCALED
+ STA KW_SALP1
+ ORA ALP2
+ STA KW_SALPHA
+ LDA BET1
+ LDY #2
+ JSR KW_SCALED
+ STA KW_SBET1
+ ORA BET2
+ STA KW_SBETA
+ LDA KW_SFULL
+ BEQ KW_MOTION_PART
+ LDA DELT4
+ STA KW_SDELT4
+ LDA DELT4+1
+ STA KW_SDELT4+1
+ LDA #$FF              ; the original rotation step
+ BNE KW_MOTION_ROT
+.KW_MOTION_PART
+ LDA DELT4+1
+ JSR KW_MULS
+ STA KW_SDELT4+1
+ LDA KW_PM
+ STA KW_SDELT4
+ LDA DELT4
+ JSR KW_MULS
+ CLC
+ ADC KW_SDELT4
+ STA KW_SDELT4
+ BCC P%+5
+ INC KW_SDELT4+1
+ LDA #16               ; 1/16 rad per tick, in 1/256 rad
+ LDY #3
+ JSR KW_SCALED
+.KW_MOTION_ROT
+ STA KW_ROTQ
+ LDA KW_TICK
+ AND #%01111111
+ STA KW_DECCMP
+ RTS
+
+; ******************************************************************************
+;
+; Scene pacing
+;
+; The title screens, escape pod, mission briefing, launch and hyperspace
+; tunnels and death screen each ran one step per frame in the original, at
+; whatever frame rate the stock game managed for that scene (much faster
+; than in flight for a single ship). So each of these steps at its own rate,
+; the stock frame rate measured for the scene (KW_RATE_* in kawari-defs.asm,
+; scaled by the pace), rather than at the flight tick rate. A frame takes
+; as many steps as are due, so the frame cap does not slow them down, and
+; each step is a whole original step (KW_WHOLE).
+;
+; ******************************************************************************
+
+KW_SC_TITLE1 = 0
+KW_SC_TITLE2 = 2
+KW_SC_ESCAPE = 4
+KW_SC_BRIEF1 = 6
+KW_SC_BRIEF2 = 8
+KW_SC_TUNNEL = 10
+KW_SC_DEATH = 12
+
+MACRO KW_SCENE_RATE rate
+ ASSERT rate * KW_SCENE_UNIT < 61440   ; a field's worth must fit in 16 bits
+ EQUW INT(rate * KW_SCENE_UNIT + 0.5)
+ENDMACRO
+
+.KW_SCENE_INC
+ KW_SCENE_RATE KW_RATE_TITLE1
+ KW_SCENE_RATE KW_RATE_TITLE2
+ KW_SCENE_RATE KW_RATE_ESCAPE
+ KW_SCENE_RATE KW_RATE_BRIEF1
+ KW_SCENE_RATE KW_RATE_BRIEF2
+ KW_SCENE_RATE KW_RATE_TUNNEL
+ KW_SCENE_RATE KW_RATE_DEATH
+.KW_SCENE_ACC
+ EQUW 0                ; tick units towards the next step
+.KW_SCENE_LAST
+ EQUB 0                ; KW_FIELDS when KW_SCENE last ran
+.KW_SCENE_N
+ EQUB 0                ; steps due in this frame
+
+; X = scene (KW_SC_*). Returns A = KW_SCENE_N = the number of steps due since
+; the last call, with Z set if there are none. At most three fields count,
+; so a scene does not jump ahead after a long pause or a slow frame.
+.KW_SCENE
+ LDA KW_FIELDS
+ TAY
+ SEC
+ SBC KW_SCENE_LAST
+ STY KW_SCENE_LAST
+ CMP #4
+ BCC P%+4
+ LDA #3
+ TAY
+ LDA #0
+ STA KW_SCENE_N
+ CPY #0
+ BEQ KW_SCENE_DONE
+.KW_SCENE_ADD
+ CLC                   ; add a field's worth...
+ LDA KW_SCENE_ACC
+ ADC KW_SCENE_INC,X
+ STA KW_SCENE_ACC
+ LDA KW_SCENE_ACC+1
+ ADC KW_SCENE_INC+1,X
+ PHA                   ; ...and move whole steps (4096 units) into KW_SCENE_N
+ AND #%00001111
+ STA KW_SCENE_ACC+1
+ PLA
+ LSR A
+ LSR A
+ LSR A
+ LSR A
+ CLC
+ ADC KW_SCENE_N
+ STA KW_SCENE_N
+ DEY
+ BNE KW_SCENE_ADD
+.KW_SCENE_DONE
+ LDA KW_SCENE_N
+ RTS
+
+; Make the following MVEIT calls whole original steps.
+.KW_WHOLE
+ LDA #$80
+ STA KW_SFULL
+ LDA #$FF
+ STA KW_TICK
+ JMP KW_MOTION
+
+; TLL2 (the title screens): the ship approaches and turns one step at a time
+; at the stock rate for the title's ship (the Cobra Mk III on the first
+; title, the Adder on the second).
+.KW_TITLE_MOVE
+ LDX #KW_SC_TITLE1
+ LDA TYPE
+ CMP #CYL
+ BEQ P%+4
+ LDX #KW_SC_TITLE2
+ JSR KW_SCENE
+ BEQ KW_TITLE_DONE
+ JSR KW_WHOLE
+.KW_TITLE_STEP
+ LDA INWK+7            ; bring the ship a step closer, down to z_hi = 1
+ CMP #1
+ BEQ P%+4
+ DEC INWK+7
+ JSR MVEIT
+ DEC KW_SCENE_N
+ BNE KW_TITLE_STEP
+.KW_TITLE_DONE
+ RTS
+
+; HFL5 (the launch and hyperspace tunnels): wait for the next ring step.
+.KW_TUNNELWAIT
+ LDA KW_SCENE_N
+ BNE KW_TUNNEL_DUE
+ LDX #KW_SC_TUNNEL
+ JSR KW_SCENE
+ BEQ KW_TUNNELWAIT
+.KW_TUNNEL_DUE
+ DEC KW_SCENE_N
+ RTS
+
+; D2 (the death screen): count down LASCT one step at a time. Returns Z set
+; when the sequence is over.
+.KW_DEATH_COUNT
+ LDX #KW_SC_DEATH
+ JSR KW_SCENE
+ BEQ KW_DEATH_MORE
+.KW_DEATH_STEP
+ DEC LASCT
+ BEQ KW_DEATH_DONE
+ DEC KW_SCENE_N
+ BNE KW_DEATH_STEP
+.KW_DEATH_MORE
+ LDA #1
+ RTS
+.KW_DEATH_DONE
+ STA KW_SCENE_N        ; (A = 0, Z set)
+ RTS
+
+; M% part 2, roll damping: pace this frame (unless MLOOP already has), then
+; damp JSTX twice as the original did, but only on a game tick. Between
+; ticks, the speed and in-system jump keys wait for the next tick.
+.KW_CNTR2
+ STX KW_ARG
+ LDA KW_PACED
+ BNE P%+5
+ JSR KW_PACE
+ LDA #0
+ STA KW_PACED
+ LDX KW_ARG
+ LDA KW_TICK
+ BNE KW_CNTR2_TICK
+ STA KY1
+ STA KY2
+ STA KY18
+ RTS
+.KW_CNTR2_TICK
+ JSR cntr
+ JMP cntr
+
+; M% part 2, pitch damping, on game ticks only.
+.KW_CNTR
+ LDA KW_TICK
+ BEQ P%+5
+ JMP cntr
+ RTS
+
+; M% part 3, before the laser logic: this frame's motion, then the laser.
+; Beam and military lasers are erased here, a frame after they were drawn
+; (MA23 defers it), so they are visible in every frame. Returns Z set to skip
+; the original firing logic between game ticks: firing (heat, energy and
+; hits) happens on ticks, but a beam that is still firing is redrawn in a new
+; place every frame, as it was in every pass of the original's loop.
+.KW_LASFR
+ JSR KW_MOTION
+ LDA KW_LASPEND
+ STA KW_LASWAS
+ BEQ KW_LASFR_TICK
+ LDA #0
+ STA KW_LASPEND
+ JSR LASLI2
+.KW_LASFR_TICK
+ LDA KW_TICK
+ BNE KW_LASFR_DONE     ; a tick: carry on with the original logic
+ LDA KW_LASWAS
+ BEQ KW_LASFR_SKIP
+ LDA KY7
+ BEQ KW_LASFR_SKIP
+ LDA GNTMP
+ CMP #242
+ BCS KW_LASFR_SKIP
+ LDX VIEW
+ LDA LASER,X
+ BEQ KW_LASFR_SKIP
+ AND #%01111111        ; LAS2 makes MA23 defer the erase again; LAS stays 0,
+ STA LAS2              ; so this does not hit anything
+ JSR KW_LASDRAW
+.KW_LASFR_SKIP
+ LDA #0
+.KW_LASFR_DONE
+ RTS
+
+; LASLI without heating the laser or draining energy.
+.KW_LASDRAW
+ JSR DORND
+ AND #7
+ ADC #Y-4
+ STA LASY
+ JSR DORND
+ AND #7
+ ADC #X-4
+ STA LASX
+ JMP LASLI2
+
+; ESCAPE's loop (ESL1): our Cobra flies away for 97 steps.
+.KW_ESCAPE_FLIGHT
+ JSR KW_PRESENT
+ LDX #KW_SC_ESCAPE
+ JSR KW_SCENE
+ BEQ KW_ESCAPE_DRAW
+ JSR KW_WHOLE
+.KW_ESCAPE_STEP
+ JSR MVEIT
+ DEC INWK+32
+ BEQ KW_ESCAPE_END
+ DEC KW_SCENE_N
+ BNE KW_ESCAPE_STEP
+.KW_ESCAPE_DRAW
+ JSR LL9
+ JMP KW_ESCAPE_FLIGHT
+.KW_ESCAPE_END
+ STA KW_SCENE_N        ; (A = 0)
+ JMP LL9
+
+; BRIEF's loops (BRL1, BRL2): the Constrictor turns for 64 steps, then
+; moves away and up a step at a time until it is out of range.
+.KW_BRIEF_SHIP
+ JSR KW_PRESENT
+ JSR LL9
+ LDX #KW_SC_BRIEF1
+ JSR KW_SCENE
+ BEQ KW_BRIEF_SHIP
+ JSR KW_WHOLE
+.KW_BRIEF_TURN
+ LDX #%01111111
+ STX INWK+29
+ STX INWK+30
+ JSR MVEIT
+ DEC MCNT
+ BEQ KW_BRIEF_AWAY
+ DEC KW_SCENE_N
+ BNE KW_BRIEF_TURN
+ BEQ KW_BRIEF_SHIP
+.KW_BRIEF_AWAY
+ JSR KW_PRESENT
+ JSR LL9
+ LDX #KW_SC_BRIEF2
+ JSR KW_SCENE
+ BEQ KW_BRIEF_AWAY
+ JSR KW_WHOLE
+.KW_BRIEF_STEP
+ LSR INWK
+ INC INWK+6
+ BEQ KW_BRIEF_DONE
+ INC INWK+6
+ BEQ KW_BRIEF_DONE
+ LDX INWK+3
+ INX
+ CPX #conhieght
+ BCC P%+4
+ LDX #conhieght
+ STX INWK+3
+ JSR MVEIT
+ DEC MCNT
+ DEC KW_SCENE_N
+ BNE KW_BRIEF_STEP
+ BEQ KW_BRIEF_AWAY
+.KW_BRIEF_DONE
+ LDA #0
+ STA KW_SCENE_N
+ RTS
+

@@ -11,7 +11,7 @@ check: c64-build
 	$(PYTHON) 2-build-files/tests/test_kawari.py
 
 c64-build:
-	$(PYTHON) 2-build-files/kawari-build.py options $(commander)
+	$(PYTHON) 2-build-files/kawari-build.py options $(commander) pace=$(pace) fps=$(fps)
 	$(BEEBASM) -i 1-source-files/main-sources/elite-data.asm -v > 3-assembled-output/kawari-compile.txt
 	$(BEEBASM) -i 1-source-files/main-sources/elite-sprites.asm -v >> 3-assembled-output/kawari-compile.txt
 	$(BEEBASM) -i 1-source-files/main-sources/elite-source.asm -v -d -labels 3-assembled-output/labels.txt >> 3-assembled-output/kawari-compile.txt

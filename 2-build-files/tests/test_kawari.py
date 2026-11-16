@@ -80,7 +80,7 @@ class Renderer(unittest.TestCase):
         # line heaps mirror the host heap addresses above them.
         self.mem[0x8000:0xda00] = bytes([0xa5]) * 0x5a00
         self.mem[0xdaa0:0xda00 + len(self.ships)] = self.ships[0xa0:]
-        self.mem[0x7fb0:0x7fc0] = bytes([0x69]) * 0x10
+        self.mem[0x7fec:0x7ff0] = bytes([0x69]) * 4
         self.assertGreaterEqual(self.cpu.run_to(0x200, self.labels["idle"],
                                                0, 0, 0, 0, 200000), 0)
 
@@ -101,8 +101,8 @@ class Renderer(unittest.TestCase):
         # split turns hires off: it must stay black. Blueprints follow it.
         self.assertEqual(bytes(self.mem[0xda00:0xdaa0]), bytes(0xa0))
         self.assertEqual(bytes(self.mem[0xdaa0:0xda00 + len(self.ships)]), self.ships[0xa0:])
-        self.assertEqual(bytes(self.mem[0x7fb0:0x7fc0]), bytes([0x69]) * 0x10)
-        self.assertEqual(bytes(self.mem[0x7c70:0x7fb0]), self.code_hi[0x70:0x3b0])
+        self.assertEqual(bytes(self.mem[0x7fec:0x7ff0]), bytes([0x69]) * 4)
+        self.assertEqual(bytes(self.mem[0x7c70:0x7fc0]), self.code_hi[0x70:0x3c0])
         for begin, end in self.CODE_RANGES:
             self.assertEqual(bytes(self.mem[begin:end]), self.code[begin - 0x200:end - 0x200])
         return cycles
@@ -491,8 +491,11 @@ class Renderer(unittest.TestCase):
         expected = bytes(self.mem[0x09:0x09 + 31])
         self.mem[:] = saved
         maximum = self.ships[blueprint - 0xd000 + 15]
+        # A whole game tick: speed * 4 unscaled, the original rotation step
+        # and the counters counting down, so the result must match exactly.
         arguments = block + [roll | rs, roll, rs, rs ^ 128, pitch | ps,
-                             pitch, ps, ps ^ 128, delta, maximum]
+                             pitch, ps, ps ^ 128, delta, maximum,
+                             block[27] * 4, 0xff, 0x7f]
         return arguments, expected
 
     def test_ship_movement_matches_original(self):
@@ -508,6 +511,50 @@ class Renderer(unittest.TestCase):
                                                   0, 0, 0, 0, 200000), 0)
                 self.assertEqual(self.mem[0x7ff2], 0)
                 self.assertEqual(bytes(self.mem[0x50:0x50 + 31]), expected)
+
+    @staticmethod
+    def vectors(data):
+        """The nine orientation vector components, as signed integers."""
+        return [(data[i] | (data[i + 1] & 0x7f) << 8) * (-1 if data[i + 1] & 0x80 else 1)
+                for i in range(9, 27, 2)]
+
+    def test_fractional_tick_movement(self):
+        """Between game ticks: scaled speed, a smaller rotation step, no countdown."""
+        rng = random.Random(43)
+        for case in range(200):
+            with self.subTest(case=case):
+                arguments, _ = self.random_move(rng)
+                arguments[28] = 0                       # acceleration is applied as usual
+                arguments[31:40] = [0, 0, 0, 128, 0, 0, 0, 128, 0]   # we are still
+                # Reference: a whole tick, rotating by the original 1/16 radian.
+                self.start()
+                self.urgent_move(arguments)
+                self.cpu.run_to(self.labels["idle"], self.labels["idle_mailbox"], 0, 0, 0, 0, 200000)
+                whole = bytes(self.mem[0x50:0x50 + 31])
+                # The same step as 1/256 radian steps: ROTQ = 16 is the same
+                # angle, made of two shears, with the counters left alone.
+                fraction = list(arguments)
+                fraction[42], fraction[43] = 16, 0
+                self.start()
+                self.urgent_move(fraction)
+                self.cpu.run_to(self.labels["idle"], self.labels["idle_mailbox"], 0, 0, 0, 0, 200000)
+                self.assertEqual(self.mem[0x7ff2], 0)
+                part = bytes(self.mem[0x50:0x50 + 31])
+                self.assertEqual(part[0:9], whole[0:9])          # same speed: same move
+                self.assertEqual(part[27], whole[27])
+                self.assertEqual(part[29:31], bytes(arguments[29:31]))
+                for a, b in zip(self.vectors(part), self.vectors(whole)):
+                    self.assertLessEqual(abs(a - b), 160, (case, a, b))
+                # No time at all: nothing moves or turns.
+                fraction[41], fraction[42] = 0, 0
+                self.start()
+                self.urgent_move(fraction)
+                self.cpu.run_to(self.labels["idle"], self.labels["idle_mailbox"], 0, 0, 0, 0, 200000)
+                still = bytes(self.mem[0x50:0x50 + 31])
+                # (Our roll and pitch of 0 can still nudge the position by one
+                # unit through the stock rounding, as on a whole tick.)
+                self.assertEqual(still[9:27], bytes(arguments[9:27]))
+                self.assertEqual(still[29:31], bytes(arguments[29:31]))
 
     def test_movement_preempts_ship_job(self):
         """An urgent move raised mid-job runs inside it without disturbing it."""

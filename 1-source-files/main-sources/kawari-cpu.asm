@@ -3,7 +3,7 @@
 ; $1000-$1bff stardust and ship code, $1c00-$1d61 and $1e00-$1f61 command
 ; buffers, $1d62-$1dff and $1f62-$1fff planet code,
 ; $2000-$79ff working image (320 x 144),
-; $7a00-$7b1f row tables, $7b20-$7bff ball line heap (x, y), $7c00-$7c6e results, $7c70-$7fef movement code,
+; $7a00-$7b1f row tables, $7b20-$7bff ball line heap (x, y), $7c00-$7c6e results, $7c70-$7fbf movement code, $7fc0-$7feb movement arguments,
 ; $7ff0 mailbox, $8000-$d9ff displayed rows, $da00-$da9f always zero (hires
 ; row 144, shown on raster 195 before the split takes effect), $daa0-$f98c ship blueprints,
 ; $f990-$fa57 space station line heap, $fa72-$ffbf ship line heaps.
@@ -774,6 +774,7 @@ ORG $0200
  INCLUDE "1-source-files/main-sources/kawari-movemath.asm"
  INCLUDE "1-source-files/main-sources/kawari-bline.asm"
  INCLUDE "1-source-files/main-sources/kawari-explode.asm"
+ INCLUDE "1-source-files/main-sources/kawari-sine.asm"   ; here to leave room in the high block
  PRINT "Main co-processor code ends at ", ~P%
  ASSERT P% <= $0C00
 ORG $0C00
@@ -853,7 +854,6 @@ ORG $1F62
 ; separately by the boot loader (the whole $7C00-$7FFF page range).
 ORG $7C70
  INCLUDE "1-source-files/main-sources/kawari-move.asm"
- INCLUDE "1-source-files/main-sources/kawari-sine.asm"
  PRINT "High co-processor code ends at ", ~P%
  ASSERT P% <= MV_ARGS
  SAVE "3-assembled-output/kawari-cpu-hi.bin", $7C00, $8000

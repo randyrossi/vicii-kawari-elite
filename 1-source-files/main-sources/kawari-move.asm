@@ -10,6 +10,12 @@
 ;   MV_ARGS+0..30   ship data block bytes #0-#30 (INWK)
 ;   MV_ARGS+31..39  ALPHA, ALP1, ALP2, ALP2+1, BETA, BET1, BET2, BET2+1, DELTA
 ;   MV_ARGS+40      maximum speed (blueprint byte #15)
+;   MV_ARGS+41      this frame's movement multiplier: speed * 4, scaled by the
+;                   fraction of a game tick that the frame represents
+;   MV_ARGS+42      own-rotation step: $FF for a whole game tick (the original
+;                   1/16 radian), otherwise the angle in 1/256 radians
+;   MV_ARGS+43      $7F on a game tick, 0 between ticks (the roll and pitch
+;                   counters only count down on game ticks)
 ; Result: bytes #0-#30 in co-processor zero page at mv_INWK ($0050), which
 ; the host reads directly (with the register overlay disabled). mv_INWK
 ; shares zero page with the stardust job, which is never interrupted.
@@ -34,7 +40,7 @@
  STA mv_INWK,X
  DEX
  BPL urgent_inwk
- LDX #9
+ LDX #12
 .urgent_globals
  LDA MV_ARGS+31,X
  STA mv_ALPHA,X
@@ -59,9 +65,7 @@
 ; MVEIT part 2 onwards, from just after MV30's JSR SCAN, for a ship (type
 ; >= 0, so the planet MV40 path and part 4's early return never apply).
 .mv_MV30
- LDA mv_INWK+27
- ASL A
- ASL A
+ LDA mv_SPEEDQ          ; speed * 4 (scaled by the host for real-time pacing)
  STA sh_Q               ; FMLTU's Q
  LDA mv_INWK+10
  AND #%01111111
@@ -194,7 +198,7 @@
  LDA mv_INWK+30
  AND #%01111111
  BEQ mv_MV8
- CMP #%01111111
+ CMP mv_DECCMP          ; $7F: count down as in the original; 0: no change
  SBC #0
  ORA mv_RAT2
  STA mv_INWK+30
@@ -214,7 +218,7 @@
  LDA mv_INWK+29
  AND #%01111111
  BEQ mv_MV5
- CMP #%01111111
+ CMP mv_DECCMP          ; $7F: count down as in the original; 0: no change
  SBC #0
  ORA mv_RAT2
  STA mv_INWK+29
@@ -364,7 +368,42 @@
  TYA
  RTS
 
+; MVS5 for a fraction of a game tick: rotate the pair (X, Y) by ROTQ/256
+; radians in the direction given by RAT2, as two shears (the same scheme as
+; MVS4 uses for our own roll and pitch):
+;   X' = X + Q * Y,  Y' = Y - Q * X'  (with the signs of the original MVS5)
+.mv_MVS5s
+ STX mv_K+3
+ LDA mv_ROTQ
+ STA mv_Q
+ LDA mv_INWK,X
+ STA mv_R
+ LDA mv_INWK+1,X
+ STA mv_S
+ LDA mv_INWK+1,Y
+ EOR mv_RAT2
+ JSR mv_MAD             ; (A X) = Q * A + (S R)
+ STX mv_K
+ LDX mv_K+3
+ STA mv_INWK+1,X
+ EOR #%10000000
+ EOR mv_RAT2
+ PHA
+ LDA mv_K
+ STA mv_INWK,X
+ LDA mv_INWK,Y
+ STA mv_R
+ LDA mv_INWK+1,Y
+ STA mv_S
+ PLA
+ JSR mv_MAD
+ STA mv_INWK+1,Y
+ STX mv_INWK,Y
+ RTS
+
 .mv_MVS5
+ LDA mv_ROTQ            ; a fraction of a game tick: rotate by ROTQ/256 rad
+ BPL mv_MVS5s
  LDA mv_INWK+1,X
  AND #%01111111
  LSR A
@@ -437,4 +476,3 @@
  LDA mv_K+1
  STA mv_INWK+1,X
  RTS
-

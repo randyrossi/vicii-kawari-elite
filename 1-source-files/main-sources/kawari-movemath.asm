@@ -2,7 +2,7 @@
 ; relocated from elite-source.asm (MLTU2, MULT1/MAD and ADD), and the
 ; movement job's zero-page variables.
 
-MV_ARGS = $7FC0                 ; urgent movement arguments (41 bytes)
+MV_ARGS = $7FC0                 ; urgent movement arguments (44 bytes)
 MV_URGENT = $7FF2               ; urgent movement request flag
 mv_INWK = $50                   ; $50-$6E, the same layout as the host
 mv_P = $E0                      ; three bytes
@@ -23,6 +23,9 @@ mv_BET1 = $F7
 mv_BET2 = $F8                   ; two bytes
 mv_DELTA = $FA
 mv_MAXSPD = $FB                 ; follows DELTA, as in MV_ARGS
+mv_SPEEDQ = $FC                 ; this frame's speed * 4, scaled for real time
+mv_ROTQ = $FD                   ; own-rotation step: $FF a whole tick, else /256 rad
+mv_DECCMP = $FE                 ; $7F on a game tick, 0 between ticks
 
 .mv_MLTU2m2
  STX mv_Q

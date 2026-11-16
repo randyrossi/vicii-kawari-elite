@@ -14,7 +14,10 @@ Run `make` in this directory. The only target disk is
 and VICE's `c1541`. The Makefile prefers the sibling
 `../tools/beebasm-new/build/beebasm`; override `BEEBASM`, `PYTHON`, or `C1541`
 if needed. `make commander=max` builds the equipped test commander;
-plain `make` restores the normal commander.
+plain `make` restores the normal commander. `make pace=N fps=F` sets the game
+pace and frame cap (see [Game pacing](#game-pacing)); the defaults are
+`pace=8 fps=25`. Each make writes all three options, so leave out only the
+ones you want at their defaults.
 
 From the Kawari workspace root:
 
@@ -118,6 +121,79 @@ The host copies of the stardust routines, LL9's projection and edge drawing,
 LL51, LSPUT/LL155, PTCLS/EXS1 and the ship part of MVEIT were removed; the
 host ship-job code occupies the stardust routines' old space.
 
+## Game pacing
+
+The original game runs its logic once per frame, at roughly 7–8 frames per
+second on a stock C64; this build draws much faster, so per-frame logic would
+make the whole game faster. Instead, game logic runs in fixed **game ticks** of
+real (PAL field) time and frames are drawn as fast as the cap allows:
+
+- `pace=N` (default 8, range 0.5–50): game ticks per second. 8 matches the
+  original's flight speed; `pace=10` makes everything 25% faster.
+- `fps=25` (default) or `fps=50`: the frame cap. A frame is presented no sooner
+  than 2 (or 1) PAL fields after the previous one. 25 FPS gives a steady
+  rate; scenes that render faster than that are smoothed by the cap.
+
+The raster IRQ counts fields (`KW_FIELDS`). Each frame, `KW_PACE` adds
+`KW_PACE_INC` = 4096×pace/50 units per elapsed field to an accumulator (a tick
+is 4096 units). A frame never counts for more than one tick: under heavy load
+(below `pace` FPS) the game slows down as the original did, instead of jumping
+ahead. `KW_PACE_STEP` holds the increment as a 16-bit word, so it can also be
+changed while the game runs (for example from the monitor).
+
+Each frame's share of a tick, s/256, scales the per-frame motion:
+
+- Our speed (DELTA, DELT4), roll and pitch (ALPHA, BETA) for the stardust, the
+  planet and every ship's movement, dithered with residuals so that, over a
+  tick, the total matches the original exactly.
+- The co-processor receives the scaled speed (×4, rounded), a rotation
+  quotient and a counter flag with the movement arguments. A ship's own roll
+  and pitch use a shear rotation by s/16 radians, and its roll and pitch counters
+  only count down on ticks. On a whole-tick frame the original code paths run
+  unchanged (and the unit tests check them against stock MVEIT).
+
+Everything else runs once per tick: TIDY and TACTICS (AI), energy, shields,
+fuel scooping, altitude/temperature and ECM (M% parts 13–16), the main loop's
+spawning, DLY and MCNT, laser and gun temperature counters, trumble breeding,
+the hyperspace countdown, the docking computer, joystick/key roll and pitch
+changes, speed keys, explosion growth and laser firing. A military laser's
+beam is redrawn between ticks, so it remains visible every frame. When docked
+every frame is a tick.
+
+Sequences that the original ran one step per frame, outside the flight loop's
+pacing, ran at whatever frame rate the stock game managed for that scene,
+which is much faster than flight for a single ship. Each now steps at its own
+rate (`KW_SCENE`, rates `KW_RATE_*` in `kawari-defs.asm`, scaled by
+`pace/8`), and a frame takes as many whole original steps as are due, so the
+frame cap does not slow them down. Durations in the emulator, stock GMA86 PAL
+disk versus this build (default options):
+
+| Sequence | Stock rate | Stock | Kawari |
+| --- | --- | --- | --- |
+| First title, Cobra Mk III approaching (z_hi 96 → 1) | 24.5/s | 3.87 s | 3.85 s |
+| Second title, Adder approaching | 44.0/s | 2.16 s | 2.16 s |
+| Launch tunnel (8 ring steps; hyperspace uses the same loop) | 13.9/s | 0.58 s | 0.57 s |
+| Escape pod, our Cobra flying away (97 steps) | 28.3/s | 3.43 s | 3.38 s |
+| Mission briefing, Constrictor turning (64 steps) | 8.7/s | 7.35 s | 7.21 s |
+| Mission briefing, Constrictor flying away | 47.4/s | 2.68 s | 2.67 s |
+| Death screen (64 passes of the flight loop) | 5.5/s | 11.70 s | 11.51 s |
+
+The stock rates vary within a sequence (a ship slows the stock game as it
+comes closer); these match each sequence's total time. On the death screen the
+ships still drift at the game pace; only its length follows the stock rate.
+
+Measured with `pace_probe`-style runs (full speed ahead, a ship rolling ahead
+of us), pace 8: 8.0 ticks/s and z closing at 321 units/s (40 per tick, as the
+original) both in the single-ship scene at 25 FPS and in the six-ship fleet at
+17 FPS. A `pace=12 fps=50` build gave 12.0 ticks/s and 482 units/s in both
+scenes, and 31 FPS with no ships in view.
+
+Caveats: rotation between ticks is a first-order approximation, so ships trace
+very slightly different paths than in the original (TIDY re-orthonormalises
+them on each tick); the random sequence differs; and speed, jump and
+roll/pitch keys are acted on only at ticks (as the original acted once per
+frame), so a very short tap that falls entirely between ticks can be missed.
+
 ## VRAM layout
 
 | Range | Purpose |
@@ -125,7 +201,7 @@ host ship-job code occupies the stardust routines' old space.
 | `$0000–$00ff` | Co-processor zero page |
 | `$0100–$0193` | Projected ship vertices (XX3, as on the host) |
 | `$0194–$01ff` | Co-processor stack |
-| `$0200–$0bff` | Renderer, vector, clipping, movement arithmetic, BLINE, explosions |
+| `$0200–$0bff` | Renderer, vector, clipping, movement arithmetic, BLINE, explosions, sine table |
 | `$0c00–$0fff` | Logarithm and antilogarithm tables |
 | `$1000–$1bff` | Stardust and ship job code |
 | `$1c00–$1d61` | Command buffer A |
@@ -137,8 +213,8 @@ host ship-job code occupies the stardust routines' old space.
 | `$7b20–$7b8f` | Ball line heap, x coordinates (LSX2), 112 entries |
 | `$7b90–$7bff` | Ball line heap, y coordinates (LSY2), 112 entries |
 | `$7c00–$7c6e` | Explosion sprite result, RNG and stardust results/particles (with gaps) |
-| `$7c70–$7fbf` | Ship movement code, sine table |
-| `$7fc0–$7fe8` | Urgent movement arguments |
+| `$7c70–$7fbf` | Ship movement code |
+| `$7fc0–$7feb` | Urgent movement arguments |
 | `$7ff0–$7ff2` | Mailbox, invalid-command diagnostic, urgent movement flag |
 | `$8000–$d9ff` | Visible image: the 144 displayed rows |
 | `$da00–$da9f` | Always zero: hires row 144 (see the raster split) |
@@ -190,8 +266,10 @@ acknowledges without consuming further commands.
 | 16 | colour, operation: EraseRestOfPlanet, WPLS2, or clearing the ball line heap |
 | 17 | 17 control bytes: stardust on the particles already in VRAM |
 
-Ship movement does not use the command lists. The host writes the 41
-arguments (ship bytes #0–#30, our pitch, roll and speed, the maximum speed) to
+Ship movement does not use the command lists. The host writes the 44
+arguments (ship bytes #0–#30, our pitch, roll and speed scaled for this frame,
+the maximum speed, the scaled speed ×4, the rotation quotient and the counter
+flag; see [Game pacing](#game-pacing)) to
 `$7fc0` and sets `$7ff2`; the co-processor checks that flag in its idle loop,
 between commands and at each vertex and line of a ship or planet job, runs
 the movement there, and clears it. The host then reads the moved ship from
@@ -223,7 +301,7 @@ python3 2-build-files/tests/bench_kawari.py
 ```
 
 `make check` compiles a small test bridge around the sibling emulator's real
-6502 core (requires a C compiler and its configured source tree). Its 14 test
+6502 core (requires a C compiler and its configured source tree). Its 15 test
 groups run the assembled co-processor image against the stock GMA86 PAL
 binary: 305 reference lines and their XOR erasure, right-edge wrapping, 256
 random coloured spans, glyphs/points, both command buffers, clears, 1,000 LL51
@@ -232,7 +310,9 @@ resident particles), 160 random ships of every type over two frames (stock
 LL9's pixels and line heap, including laser lines, XOR redraw and erasure),
 dots and heap moves, 64 exploding ships of every type over three frames
 (stock LL9/DOEXP: cloud pixels, erasure, the cloud heap and the PTCLS2 sprite
-position), 600 random ship movements (stock MVEIT parts 2–7), urgent
+position), 600 random ship movements (stock MVEIT parts 2–7), 200
+fractional-tick movements (scaled rotation tracks a whole tick; zero speed and
+rotation leave the ship still), urgent
 movement raised in the middle of ship jobs, and 120 random planet circles over
 three frames (stock CIRCLE2 and EraseRestOfPlanet: pixels and ball line heap).
 Canary checks ensure commands cannot change code, blueprints or the visible
@@ -265,7 +345,9 @@ breakdown); `BENCH_EXTRA="PLANET CIRCLE2"` adds routines to the breakdown.
 ## Measurements
 
 Emulated PAL frame rates in the supplied Kawari VICE, original Kawari build
-(commit `bad6aff`) versus this one, with the same scripts:
+(commit `bad6aff`) versus this one, with the same scripts. These were measured
+before the frame cap; with the default `fps=25` the title and flight scenes
+now run at exactly 25 FPS (the cap) and the game pace is fixed by `pace`:
 
 | Scene | Original | Now |
 | --- | --- | --- |
@@ -298,6 +380,11 @@ it a little time. Long-play coverage of all missions, combat conditions and
 commander save/load cases is still recommended. The normal game save menu
 remains available; the automated disk test is read-only and checks the
 missing-file recovery path.
+
+On 2026-11-15, with pacing and scene rates (default `pace=8 fps=25`), `make check` (15 groups)
+and the KERNAL-trap smoke test passed: title 25.0 FPS, flight 25.0 FPS, all copy
+samples within rasters 152–199. Disk image SHA-256
+`3cef535dbec5b470b1515266a67530dbfb8bba11444328ba874b8cc58e1736c6`.
 
 The full-1541-emulation run passed on 2026-11-07 with these changes: title
 47.5 FPS, flight 36.1 FPS, all eight copy samples within rasters 152–311 and

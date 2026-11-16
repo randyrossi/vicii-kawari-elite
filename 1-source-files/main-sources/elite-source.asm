@@ -3322,8 +3322,9 @@ ENDIF
 
  LDX JSTX               ; Set X to the current rate of roll in JSTX
 
- JSR cntr               ; Apply keyboard damping twice (if enabled) so the roll
- JSR cntr               ; rate in X creeps towards the centre by 2
+ JSR KW_CNTR2           ; Kawari: pace this frame (see KW_PACE), then apply
+                        ; keyboard damping twice (if enabled) on a game tick so
+                        ; the roll rate in X creeps towards the centre by 2
 
                         ; The roll rate in JSTX increases if we press ">" (and
                         ; the RL indicator on the dashboard goes to the right)
@@ -3383,7 +3384,8 @@ ENDIF
 
  LDX JSTY               ; Set X to the current rate of pitch in JSTY
 
- JSR cntr               ; Apply keyboard damping so the pitch rate in X creeps
+ JSR KW_CNTR            ; Apply keyboard damping (on a game tick) so the pitch
+                        ; rate in X creeps
                         ; towards the centre by 1
 
  TXA                    ; Set A and Y to the pitch rate but with the sign bit
@@ -3666,11 +3668,9 @@ ENDIF
  ROR DELT4
  STA DELT4+1
 
- LDA KW_LASPEND         ; Kawari: erase a beam or military laser drawn in the
- BEQ P%+10              ; previous loop (see MA23), in the same frame as any
- LDA #0                 ; new laser lines
- STA KW_LASPEND
- JSR LASLI2
+ JSR KW_LASFR           ; Kawari: scale this frame's motion, erase a beam or
+ BEQ MA3                ; military laser drawn last frame (see MA23) and, between
+                        ; game ticks, just redraw a beam that is still firing
 
  LDA LASCT              ; If LASCT is zero, keep going, otherwise the laser is
  BNE MA3                ; a pulse laser that is between pulses, so jump down to
@@ -4562,6 +4562,10 @@ ENDIF
 
 .MA18
 
+ LDA KW_TICK            ; Kawari: parts 13 to 15 (energy, shields, spawning the
+ BNE P%+5               ; station, altitude, heat and fuel scooping) run once
+ JMP MA23               ; per game tick
+
  LDA BOMB               ; If we set off our energy bomb (see MA24 above), then
  BPL MA77               ; BOMB is now negative, so this skips to MA21 if our
                         ; energy bomb is not going off
@@ -5084,6 +5088,9 @@ ENDIF
                         ; effect if this is a beam laser)
 
 .MA16
+
+ LDA KW_TICK            ; Kawari: the E.C.M. drains energy and counts down once
+ BEQ MA66               ; per game tick
 
  LDA ECMP               ; If our E.C.M is not on, skip to MA69, otherwise keep
  BEQ MA69               ; going to drain some energy
@@ -10717,15 +10724,8 @@ ENDIF
 
 .ESL1
 
- JSR KW_PRESENT         ; escape-pod animation bypasses the normal flight loop
- JSR MVEIT              ; Call MVEIT to move the Cobra in space
-
- JSR LL9                ; Call LL9 to draw the Cobra on-screen
-
- DEC INWK+32            ; Decrement the counter in byte #32
-
- BNE ESL1               ; Loop back to keep moving the Cobra until the AI flag
-                        ; is 0, which gives it time to drift away from our pod
+ JSR KW_ESCAPE_FLIGHT   ; Kawari: the Cobra flies away for 97 game ticks, drawn
+                        ; in every frame (see kawari-host.asm)
 
  JSR SCAN               ; Call SCAN to remove the Cobra from the scanner (by
                         ; redrawing it)
@@ -13539,7 +13539,9 @@ ENDIF
                         ; twice the radius of the previous one, until they won't
                         ; fit on-screen
 
- JSR KW_PRESENT         ; publish a complete tunnel-ring set, never a segment
+ JSR KW_PRESENT
+
+ JSR KW_TUNNELWAIT      ; Kawari: one ring step at the stock tunnel's rate
 
  INC XX4                ; Increment the counter and fetch it into X
  LDX XX4
@@ -16260,66 +16262,9 @@ ENDIF
  LDA #64                ; Set the main loop counter to 64, so the ship rotates
  STA MCNT               ; for 64 iterations through MVEIT
 
-.BRL1
-
- JSR KW_PRESENT
-
- LDX #%01111111         ; Set the ship's roll counter to a positive roll that
- STX INWK+29            ; doesn't dampen (a clockwise roll)
-
- STX INWK+30            ; Set the ship's pitch counter to a positive pitch that
-                        ; doesn't dampen (a diving pitch)
-
- JSR LL9                ; Draw the ship on screen
-
- JSR MVEIT              ; Call MVEIT to rotate the ship in space
-
- DEC MCNT               ; Decrease the counter in MCNT
-
- BNE BRL1               ; Loop back to keep moving the ship until we have done
-                        ; all 64 iterations
-
-.BRL2
-
- JSR KW_PRESENT
-
- LSR INWK               ; Halve x_lo so the Constrictor moves towards the centre
-
- INC INWK+6             ; Increment z_lo so the Constrictor moves away from us
-
- BEQ BR2                ; If z_lo = 0 (i.e. it just went past 255), jump to BR2
-                        ; to show the briefing
-
- INC INWK+6             ; Increment z_lo so the Constrictor moves a bit further
-                        ; away from us
-
- BEQ BR2                ; If z_lo = 0 (i.e. it just went past 255), jump out of
-                        ; the loop to BR2 to stop moving the ship up the screen
-                        ; and show the briefing
-
- LDX INWK+3             ; Set X = y_lo + 1
- INX
-
- CPX #conhieght         ; If X < conhieght then skip the next instruction
- BCC P%+4
-
- LDX #conhieght         ; X is bigger than conhieght, so set X = conhieght so
-                        ; that X has a maximum value of conhieght
-
- STX INWK+3             ; Set y_lo = X
-                        ;          = y_lo + 1
-                        ;
-                        ; so the ship moves up the screen (as space coordinates
-                        ; have the y-axis going up)
-
- JSR LL9                ; Draw the ship on screen
-
- JSR MVEIT              ; Call MVEIT to move and rotate the ship in space
-
- DEC MCNT               ; Decrease the counter in MCNT
-
- JMP BRL2               ; Loop back to keep moving the ship up the screen and
-                        ; away from us
+ JSR KW_BRIEF_SHIP      ; Kawari: the Constrictor turns for 64 game ticks and
+                        ; then flies away, drawn in every frame (see
+                        ; kawari-host.asm)
 
 .BR2
 
@@ -23184,6 +23129,8 @@ ENDIF
  STA frump              ; Store the cloud counter in frump, so we can retrieve
                         ; it below
 
+ LDX KW_TICK            ; Kawari: the cloud grows once per game tick (LDX
+ BEQ DOEXP_HOLD         ; and BEQ leave the carry for the ADC)
  ADC #4                 ; Add 4 to the cloud counter, so it ticks onwards every
                         ; we redraw it
 
@@ -23191,6 +23138,7 @@ ENDIF
                         ; the explosion flags and return from the subroutine
 
  STA (XX19),Y           ; Store the updated cloud counter in byte #1 of the ship
+.DOEXP_HOLD
                         ; line heap
 
  JSR DVID4              ; Calculate the following:
@@ -28760,10 +28708,15 @@ ENDIF
 
  JSR M%                 ; Call M% to iterate through the main flight loop
 
+ LDA KW_TICK            ; Kawari: the message delay, the main loop counter and
+ BNE P%+5               ; the spawning of new ships advance once per game tick
+ JMP MLOOP
+
  DEC DLY                ; Decrement the delay counter in DLY, so any in-flight
                         ; messages get removed once the counter reaches zero
 
- BEQ me2                ; If DLY is now 0, jump to me2 to remove any in-flight
+ BNE P%+5               ; Kawari: (me2 is out of branch range)
+ JMP me2                 ; If DLY is now 0, jump to me2 to remove any in-flight
                         ; message from the space view, and once done, return to
                         ; me3 below, skipping the following two instructions
 
@@ -29296,9 +29249,18 @@ ENDIF
 .MLOOP
  JSR KW_PRESENT
 
+ JSR KW_PACE            ; Kawari: measure this frame and decide whether it is a
+ LDA QQ12               ; game tick (when docked, every pass is a tick, as M%
+ BEQ P%+7               ; is not running)
+ LDA #$FF
+ STA KW_TICK
+
  LDX #$FF               ; Set the stack pointer to $01FF, which is the standard
  TXS                    ; location for the 6502 stack, so this instruction
                         ; effectively resets the stack
+
+ LDA KW_TICK            ; Kawari: the laser cools and pulses once per game tick
+ BEQ NOLASCT
 
  LDX GNTMP              ; If the laser temperature in GNTMP is non-zero,
  BEQ EE20               ; decrement it (i.e. cool it down a bit)
@@ -29340,6 +29302,9 @@ ENDIF
                         ; to slow the main loop down a bit
 
 .plus13
+
+ LDA KW_TICK            ; Kawari: Trumbles breed and squeak once per game tick
+ BEQ NOSQUEEK
 
  LDA TRIBBLE+1          ; If the high byte of TRIBBLE(1 0), the number of
  BEQ nobabies           ; Trumbles in the hold, is zero, jump to nobabies to
@@ -29700,6 +29665,9 @@ ENDIF
  LDA QQ22+1             ; If the on-screen hyperspace counter is zero, return
  BEQ t95                ; from the subroutine (as t95 contains an RTS), as we
                         ; are not currently counting down to a hyperspace jump
+
+ LDA KW_TICK            ; Kawari: count down once per game tick
+ BEQ t95
 
  DEC QQ22               ; Decrement the internal hyperspace counter
 
@@ -30164,14 +30132,9 @@ ENDIF
                         ; move everything about, as well as decrementing the
                         ; value in LASCT
 
- DEC LASCT              ; Decrement the counter in LASCT, which we set above,
-                        ; so for each loop around D2, we decrement LASCT by 5
-                        ; (the main loop decrements it by 4, and this one makes
-                        ; it 5)
-
- BNE D2                 ; Loop back to call the main flight loop again, until we
-                        ; have called it 127 times
-
+ JSR KW_DEATH_COUNT     ; Kawari: count down LASCT (set to 64 above) in steps
+ BNE D2                 ; at the stock death screen's rate, and loop back to
+                        ; call the main flight loop until it reaches zero
  LDX #31                ; Set the screen to show all 31 text rows, which shows
  JSR DET1               ; the dashboard
 
@@ -30741,18 +30704,10 @@ ENDIF
 
 .TLL2
 
- LDA INWK+7             ; If z_hi (the ship's distance) is 1, jump to TL1 to
- CMP #1                 ; skip the following decrement
- BEQ TL1
-
- DEC INWK+7             ; Decrement the ship's distance, to bring the ship
-                        ; a bit closer to us
-
+ JSR KW_TITLE_MOVE      ; Kawari: bring the ship closer and turn it, in steps
+                        ; at the stock title's rate (this replaces moving it
+                        ; a step and calling MVEIT once per frame)
 .TL1
-
- JSR MVEIT              ; Move the ship in space according to the orientation
-                        ; vectors and the new value in z_hi
-
  LDX distaway           ; Set z_lo to the distance value we passed to the
  STX INWK+6             ; routine, so this is the closest the ship gets to us
 
@@ -33915,6 +33870,10 @@ ENDIF
 
  JSR RDKEY              ; Scan the keyboard for a key press and return the
                         ; internal key number in A and X (or 0 for no key press)
+
+ LDA KW_TICK            ; Kawari: the docking computer and the roll and pitch
+ BNE P%+5               ; keys act once per game tick (the pause keys below are
+ JMP DK4                ; checked every frame)
 
 ;JSR U%                 ; These instructions are commented out in the original
 ;                       ; source
@@ -37820,6 +37779,9 @@ ENDIF
  BNE MV30               ; we don't need to tidy its orientation vectors or apply
                         ; tactics
 
+ LDA KW_TICK            ; Kawari: tidy and apply tactics once per game tick
+ BEQ MV3
+
  LDA MCNT               ; Fetch the main loop counter
 
  EOR XSAV               ; Fetch the slot number of the ship we are moving, EOR
@@ -37875,6 +37837,9 @@ ENDIF
                         ; move it, which ends by jumping back into this routine
                         ; at MV45 (after all the rotation, tactics and scanner
                         ; code, which we don't need to apply to planets or suns)
+
+ LDA KW_TICK            ; Kawari: tactics once per game tick
+ BEQ MV30
 
  LDA INWK+32            ; Fetch the ship's byte #32 (AI flag) into A
 
@@ -37955,7 +37920,7 @@ ENDIF
 
 .MV45
 
- LDA DELTA              ; Set R to our speed in DELTA
+ LDA KW_SDELTA              ; Set R to our speed in DELTA
  STA R
 
  LDA #%10000000         ; Set A to zeroes but with bit 7 set, so that (A R) is
@@ -38331,7 +38296,7 @@ ENDIF
 
 .MVS4
 
- LDA ALPHA              ; Set Q = alpha (the roll angle to rotate through)
+ LDA KW_SALPHA            ; Set Q = alpha (the roll angle to rotate through)
  STA Q
 
  LDX INWK+2,Y           ; Set (S R) = nosev_y
@@ -38372,7 +38337,7 @@ ENDIF
  STX P                  ; This instruction has no effect as MAD overwrites P,
                         ; but it sets P = nosev_x_lo
 
- LDA BETA               ; Set Q = beta (the pitch angle to rotate through)
+ LDA KW_SBETA             ; Set Q = beta (the pitch angle to rotate through)
  STA Q
 
  LDX INWK+2,Y           ; Set (S R) = nosev_y
@@ -38547,7 +38512,7 @@ ENDIF
 
 .MV40
 
- LDA ALPHA              ; Set Q = -ALPHA, so Q contains the angle we want to
+ LDA KW_SALPHA            ; Set Q = -ALPHA, so Q contains the angle we want to
  EOR #%10000000         ; roll the planet through (i.e. in the opposite
  STA Q                  ; direction to our ship's roll angle alpha)
 
@@ -38578,7 +38543,7 @@ ENDIF
 
  STA P+1                ; Set P+1 = K+2
 
- LDA BETA               ; Set Q = beta, the pitch angle of our ship
+ LDA KW_SBETA             ; Set Q = beta, the pitch angle of our ship
  STA Q
 
  LDA K+3                ; Set K+3 to K2+3, so now we have result 1 above:
@@ -38742,7 +38707,7 @@ ENDIF
                         ;   y = K2 + K
                         ;     = K2 - beta * z
 
- LDA ALPHA              ; Set A = alpha
+ LDA KW_SALPHA            ; Set A = alpha
  STA Q
 
  LDA INWK+3             ; Set P(1 0) = (y_hi y_lo)
