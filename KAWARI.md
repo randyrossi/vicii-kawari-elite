@@ -279,7 +279,12 @@ that was queued earlier.
 The host uploads stardust particles only after nWq (new stardust) or FLIP
 (view change) has changed them, and fetches them back only before FLIP. RAND
 is sent with every stardust command but no longer read back, so respawning
-stardust no longer advances the host's random sequence.
+stardust no longer advances the host's random sequence. The renderer seeds its
+RAND with the host's RAND EOR the RAND it left after the previous stardust
+frame (kept at `$7c1d`). Between game ticks the host's RAND rarely changes,
+and seeding from it alone respawned stardust in the same few places frame
+after frame, which looked like trails while rolling (77% of respawns repeated
+a spot in a 150-frame roll; none do now).
 Likewise, drawing an explosion cloud no longer stirs the host's RAND and
 RAND+2 (PTCLS reseeds them per vertex and leaves them changed); the host still
 sets RAND+3 from the planet's z_lo as PTCLS did. Neither affects what the game
@@ -306,7 +311,7 @@ groups run the assembled co-processor image against the stock GMA86 PAL
 binary: 305 reference lines and their XOR erasure, right-edge wrapping, 256
 random coloured spans, glyphs/points, both command buffers, clears, 1,000 LL51
 vector products, 160 stardust cases across all four views (plus second frames on
-resident particles), 160 random ships of every type over two frames (stock
+resident particles, seeded from the previous frame's RAND), 160 random ships of every type over two frames (stock
 LL9's pixels and line heap, including laser lines, XOR redraw and erasure),
 dots and heap moves, 64 exploding ships of every type over three frames
 (stock LL9/DOEXP: cloud pixels, erasure, the cloud heap and the PTCLS2 sprite
@@ -384,7 +389,7 @@ missing-file recovery path.
 On 2026-11-15, with pacing and scene rates (default `pace=8 fps=25`), `make check` (15 groups)
 and the KERNAL-trap smoke test passed: title 25.0 FPS, flight 25.0 FPS, all copy
 samples within rasters 152–199. Disk image SHA-256
-`3cef535dbec5b470b1515266a67530dbfb8bba11444328ba874b8cc58e1736c6`.
+`a9cc6412943bfc2c761a3df97533d274c28d8fcd536bdf76a5f8099d94063bd4`.
 
 The full-1541-emulation run passed on 2026-11-07 with these changes: title
 47.5 FPS, flight 36.1 FPS, all eight copy samples within rasters 152–311 and

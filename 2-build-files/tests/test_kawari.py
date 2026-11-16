@@ -253,6 +253,10 @@ class Renderer(unittest.TestCase):
                 self.mem[:] = reference
                 for address, value in zip(addresses, controls):
                     self.mem[address] = value
+                # The renderer seeds RAND with the host's RAND EOR the RAND it
+                # left after the previous frame.
+                for i in range(4):
+                    self.mem[2 + i] = controls[13 + i] ^ vram[0x7c1d + i]
                 self.assertGreater(self.cpu.reference_run_to(self.stock_stars, 0x200,
                                                    0, 0, 0, 0, 200000), 0)
                 expected = bytes(self.mem[0x6a2:0x6f0])

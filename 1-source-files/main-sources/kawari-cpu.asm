@@ -813,6 +813,13 @@ ORG $1000
  INX
  CPX #17
  BNE stars_controls
+ LDX #3                ; seed the stardust's RAND with the host's RAND EOR
+.stars_seed            ; the RAND this routine left last time ($7C1D), so the
+ LDA $5D,X             ; sequence keeps going when the host's RAND has not
+ EOR $7C1D,X           ; changed (between game ticks it rarely does), rather
+ STA $5D,X             ; than respawning stardust in the same places again
+ DEX
+ BPL stars_seed
  LDA stars_resident
  BNE stars_run
  LDX #0
