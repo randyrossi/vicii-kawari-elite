@@ -1,6 +1,8 @@
 ; PAL Kawari disk bootstrap. Standard CBM files avoid the original PAL
 ; loader's fixed sector map, so the game and co-processor may change size.
 CPU 0
+FIRMWARE_MAJOR = 1     ; oldest Kawari firmware with the 6502 co-processor
+FIRMWARE_MINOR = 20
 ORG $07FF
  EQUW $0801
 .boot_start
@@ -21,6 +23,50 @@ ORG $07FF
  STA $D03F
  LDA #50
  STA $D03F
+ ; The co-processor needs firmware 1.20 or later. The major and minor version
+ ; are extra registers $83 and $84 (read through the overlay). A C64 without a
+ ; Kawari reads $FF for both, which is refused as well.
+ LDA #$20
+ STA $D03F             ; extra register overlay on, no auto-increment
+ LDA #0
+ STA $D03A
+ LDA #$84
+ STA $D039
+ LDX $D03B             ; X = minor
+ LDA #$83
+ STA $D039
+ LDA $D03B             ; A = major
+ CMP #$FF
+ BEQ old_firmware
+ CMP #FIRMWARE_MAJOR
+ BCC old_firmware
+ BNE firmware_ok
+ CPX #FIRMWARE_MINOR
+ BCS firmware_ok
+.old_firmware
+ LDA #0
+ STA $D03F             ; overlay off
+ CLI
+ LDY #0
+.message_char
+ LDA firmware_message,Y
+ BEQ message_done
+ JSR $FFD2             ; CHROUT
+ INY
+ BNE message_char
+.message_done
+ JSR $E453             ; restore BASIC's vectors (launch.prg replaced them)
+ JMP ($A002)           ; BASIC warm start: READY.
+.firmware_message
+ EQUB 147, 14          ; clear screen, upper/lower case character set
+ MAPCHAR 'a', 'z', $41 ; PETSCII in that set: $41-$5A lower, $C1-$DA upper
+ MAPCHAR 'A', 'Z', $C1
+ EQUS "Kawari firmware v1.20 or higher is", 13   ; 44 characters: break the
+ EQUS "required."                                ; line between words
+ MAPCHAR 'a', 'z', 'a'
+ MAPCHAR 'A', 'Z', 'A'
+ EQUB 13, 0
+.firmware_ok
  LDA #0
  STA $D037
  LDA #$20

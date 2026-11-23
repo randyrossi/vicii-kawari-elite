@@ -37,6 +37,14 @@ standard CBM files: `ELITE` autostarts `KAWARI`, which uploads the co-processor
 image and loads the game resources. Use the **vicii-kawari-vice** emulator, not
 vicii-vice-3.4. NTSC and stock VIC-II hardware are not supported.
 
+Kawari firmware 1.20 or later (the first with the 6502 co-processor) is
+required. `KAWARI` reads the major and minor version from extra registers `$83`
+and `$84` before touching anything else. On older firmware, or on a C64 without
+a Kawari (both read `$FF`), it clears the screen, prints "Kawari firmware v1.20
+or higher is required." and returns to BASIC. The minimum version is
+`FIRMWARE_MAJOR`/`FIRMWARE_MINOR` in `kawari-boot.asm`. The vicii-kawari-vice
+emulator reports 1.20.
+
 ## Rendering and division of work
 
 The native 6502 program is assembled for its VRAM addresses (a main block at
@@ -386,10 +394,12 @@ commander save/load cases is still recommended. The normal game save menu
 remains available; the automated disk test is read-only and checks the
 missing-file recovery path.
 
-On 2026-11-15, with pacing and scene rates (default `pace=8 fps=25`), `make check` (15 groups)
-and the KERNAL-trap smoke test passed: title 25.0 FPS, flight 25.0 FPS, all copy
+On 2026-11-23, with pacing, scene rates and the firmware check (default
+`pace=8 fps=25`, emulator reporting 1.20), `make check` (15 groups) and the
+KERNAL-trap smoke test passed: title 25.0 FPS, flight 25.0 FPS, all copy
 samples within rasters 152–199. Disk image SHA-256
-`a9cc6412943bfc2c761a3df97533d274c28d8fcd536bdf76a5f8099d94063bd4`.
+`a2c7a6b14588a69dd1b606dcb4f6f4d8c3c104584f45e39d197841808b962fcf`. With the
+minimum raised to 1.21, the same emulator showed the firmware message.
 
 The full-1541-emulation run passed on 2026-11-07 with these changes: title
 47.5 FPS, flight 36.1 FPS, all eight copy samples within rasters 152–311 and
