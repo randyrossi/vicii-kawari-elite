@@ -7,7 +7,7 @@ if sys.argv[1] == "options":
     words = sys.argv[2:]
     maximum = "TRUE" if "max" in words else "FALSE"
     settings = dict(w.split("=", 1) for w in words if "=" in w and w.split("=", 1)[1])
-    pace = float(settings.get("pace", "8"))
+    pace = float(settings.get("pace", "12"))
     fps = int(settings.get("fps", "25"))
     if not 0.5 <= pace <= 50:
         sys.exit("pace must be between 0.5 and 50 game ticks per second")
